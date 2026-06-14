@@ -70,9 +70,10 @@ function getState() {
     .map((w) => ({
       id: w.id, name: w.name, status: w.status, dockId: w.dockId,
       breakStartedAt: w.breakStartedAt || null,
-      assignAt: w.breakStartedAt ? w.breakStartedAt + config.ASSIGN_DELAY_SEC * 1000 : null,
+      assignAt: w.breakStartedAt ? w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000 : null,
       returnAt: w.breakStartedAt ? w.breakStartedAt + config.BREAK_DELAY_SEC * 1000 : null,
       returningUntil: w.returningUntil || null,
+      updatedAt: w.updatedAt || 0,
     }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
 
@@ -82,6 +83,7 @@ function getState() {
     serverNow: Date.now(),
     assignDelaySec: config.ASSIGN_DELAY_SEC,
     breakDelaySec: config.BREAK_DELAY_SEC,
+    fastMode: isFastWindow(Date.now(), state.startedAt),
     docks,
     workers,
     stats: {
@@ -101,11 +103,20 @@ function getState() {
 // 하루 세팅: active = 가동 도크 id 배열, roster = [{dockId, workerName}]
 function setup({ active, roster } = {}) {
   if (!Array.isArray(active) || active.length === 0) throw new Error('가동 도크를 1개 이상 선택하세요');
+
+  // 휴게/복귀대기 중인 작업자는 세팅 폼에 안 보이므로 보존(인원 변경 시 사라지지 않게).
+  // 단, 새 명단에 같은 이름이 있으면 그쪽을 우선(중복 방지).
+  const prev = state;
+  const rosterNames = new Set((roster || []).map((r) => (r.workerName || '').trim()).filter(Boolean));
+  const preserved = (prev && prev.workers ? Object.values(prev.workers) : [])
+    .filter((w) => (w.status === 'break' || w.status === 'ready') && !rosterNames.has(w.name));
+  const keepStartedAt = prev && prev.configured ? prev.startedAt : null; // 진행 중이면 시작시각 유지
+
   for (const id of [...timers.keys()]) clearTimer(id);
 
   state = freshState();
   state.configured = true;
-  state.startedAt = Date.now();
+  state.startedAt = keepStartedAt || Date.now();
 
   active.forEach((id) => {
     const d = state.docks[id];
@@ -119,11 +130,19 @@ function setup({ active, roster } = {}) {
     const d = state.docks[dockId];
     if (!d || !d.active) return;
     const id = 'w' + (n++);
-    state.workers[id] = { id, name, status: 'working', dockId, breakStartedAt: null, readyAt: null, returningUntil: null };
+    state.workers[id] = { id, name, status: 'working', dockId, breakStartedAt: null, readyAt: null, returningUntil: null, updatedAt: Date.now() };
     d.status = 'working'; d.workerId = id; d.freedAt = null;
   });
 
-  logEvent('setup', { active: active.length, workers: Object.keys(state.workers).length });
+  // 보존된 휴게/복귀대기 작업자 복원 (새 id로, 휴게 타이머 다시 걸기)
+  preserved.forEach((w) => {
+    const id = 'w' + (n++);
+    state.workers[id] = { ...w, id };
+    if (w.status === 'break') scheduleAssign(id);
+  });
+  tryMatch(); // 복귀 준비된 보존 작업자가 빈 도크 잡도록
+
+  logEvent('setup', { active: active.length, workers: Object.keys(state.workers).length, preserved: preserved.length });
   persistAndEmit();
 }
 
@@ -136,7 +155,7 @@ function endWork(dockId) {
 
   const w = state.workers[d.workerId];
   d.status = 'waiting'; d.freedAt = Date.now(); d.workerId = null;
-  w.status = 'break'; w.dockId = null; w.breakStartedAt = Date.now(); w.readyAt = null; w.returningUntil = null;
+  w.status = 'break'; w.dockId = null; w.breakStartedAt = Date.now(); w.readyAt = null; w.returningUntil = null; w.updatedAt = Date.now();
 
   scheduleAssign(w.id);
   logEvent('end', { dockId, workerId: w.id, worker: w.name });
@@ -163,12 +182,13 @@ function manualAssign(workerId, dockId) {
     oldDock.workerId = w2.id; w2.dockId = oldDock.id;
     d.workerId = w.id; w.dockId = d.id;
     w.returningUntil = null; w2.returningUntil = null;
+    w.updatedAt = Date.now(); w2.updatedAt = Date.now();
     logEvent('swap', { a: w.name, b: w2.name, dockA: d.id, dockB: oldDock.id });
   } else {
     // 빈(대기) 도크로 이동 → 원래 자리는 대기열로
     oldDock.status = 'waiting'; oldDock.freedAt = Date.now(); oldDock.workerId = null;
     d.status = 'working'; d.workerId = w.id; d.freedAt = null;
-    w.dockId = d.id; w.returningUntil = null;
+    w.dockId = d.id; w.returningUntil = null; w.updatedAt = Date.now();
     logEvent('move', { worker: w.name, from: oldDock.id, to: d.id });
   }
   tryMatch();
@@ -183,11 +203,21 @@ function reset() {
 
 // ---- 내부 로직 ----
 
+// 빠른 배정 윈도우(작업 시작 1시간 이내 또는 KST 새벽 1~2시)면 짧은 지연을 쓴다.
+function isFastWindow(t, startedAt) {
+  if (startedAt && t - startedAt < config.FAST_AFTER_START_MIN * 60 * 1000) return true;
+  const kstHour = new Date(t + config.TZ_OFFSET_HOURS * 3600 * 1000).getUTCHours();
+  return kstHour === config.FAST_AM_HOUR;
+}
+function assignDelaySecFor(t, startedAt) {
+  return isFastWindow(t, startedAt) ? config.FAST_ASSIGN_DELAY_SEC : config.ASSIGN_DELAY_SEC;
+}
+
 function scheduleAssign(workerId) {
   clearTimer(workerId);
   const w = state.workers[workerId];
   if (!w || w.status !== 'break') return;
-  const ms = Math.max(0, w.breakStartedAt + config.ASSIGN_DELAY_SEC * 1000 - Date.now());
+  const ms = Math.max(0, w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000 - Date.now());
   timers.set(workerId, setTimeout(() => markReady(workerId), ms));
 }
 
@@ -200,7 +230,7 @@ function clearTimer(workerId) {
 function markReady(workerId) {
   const w = state.workers[workerId];
   if (!w || w.status !== 'break') return;
-  const due = w.breakStartedAt + config.ASSIGN_DELAY_SEC * 1000;
+  const due = w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000;
   if (Date.now() < due - 200) { scheduleAssign(workerId); return; } // 너무 이름 → 다시 예약
   w.status = 'ready'; w.readyAt = due;
   clearTimer(workerId);
@@ -213,9 +243,11 @@ function markReadyDue() {
   const now = Date.now();
   let changed = false;
   for (const w of Object.values(state.workers)) {
-    if (w.status === 'break' && now >= w.breakStartedAt + config.ASSIGN_DELAY_SEC * 1000) {
+    if (w.status !== 'break') continue;
+    const due = w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000;
+    if (now >= due) {
       w.status = 'ready';
-      w.readyAt = w.breakStartedAt + config.ASSIGN_DELAY_SEC * 1000;
+      w.readyAt = due;
       clearTimer(w.id);
       changed = true;
     }
@@ -248,7 +280,7 @@ function assign(worker, dock) {
   worker.dockId = dock.id; worker.status = 'working';
   // 배정은 8분에 났지만 실제 복귀는 10분 → 그 사이 "복귀중"으로 표시
   worker.returningUntil = bs ? bs + config.BREAK_DELAY_SEC * 1000 : null;
-  worker.breakStartedAt = null; worker.readyAt = null;
+  worker.breakStartedAt = null; worker.readyAt = null; worker.updatedAt = Date.now();
   clearTimer(worker.id);
   logEvent('assign', { dockId: dock.id, workerId: worker.id, worker: worker.name });
 }
@@ -266,4 +298,4 @@ function logEvent(type, data) {
 function persistAndEmit() { db.save(state); emit(); }
 function emit() { try { broadcast(getState()); } catch (e) { console.error('[engine] emit 실패:', e.message); } }
 
-module.exports = { init, setBroadcast, getState, setup, endWork, manualAssign, reset };
+module.exports = { init, setBroadcast, getState, setup, endWork, manualAssign, reset, isFastWindow, assignDelaySecFor };

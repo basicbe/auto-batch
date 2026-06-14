@@ -22,7 +22,8 @@ function render() {
   }
   stat.innerHTML = `가동 ${s.stats.active} · 휴게중 ${s.stats.onBreak} · 대기도크 ${s.stats.waiting}`;
 
-  const ws = [...s.workers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+  // 최근에 배정/변경된 작업자가 맨 위로 (동률이면 이름순)
+  const ws = [...s.workers].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || (a.name || '').localeCompare(b.name || '', 'ko'));
   board.innerHTML = '';
   ws.forEach((w) => board.appendChild(card(w, now)));
 }

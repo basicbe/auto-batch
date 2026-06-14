@@ -5,5 +5,4 @@ data/
 # 환경변수 파일(비밀) — 모든 .env / .env.* 제외, 비밀 없는 예시 템플릿만 유지
 .env
 .env.*
-!.env.example
 .claude

@@ -14,7 +14,19 @@ const DOCK_DEFS = [
 const ASSIGN_DELAY_SEC = Number(process.env.ASSIGN_DELAY_SEC || 8 * 60);
 const BREAK_DELAY_SEC = Number(process.env.BREAK_DELAY_SEC || 10 * 60);
 
+// 빠른 배정 윈도우: 아래 구간에 휴게가 시작되면 배정을 ASSIGN_DELAY_SEC 대신
+// FAST_ASSIGN_DELAY_SEC(기본 4초)로 — "바로바로" 배치.
+//   ① 작업 시작 후 FAST_AFTER_START_MIN 분 이내 (기본 60분)
+//   ② 한국시간(KST) FAST_AM_HOUR 시대 (기본 1 → 01:00~01:59). 서버가 해외여도 KST 기준.
+const FAST_ASSIGN_DELAY_SEC = Number(process.env.FAST_ASSIGN_DELAY_SEC || 4);
+const FAST_AFTER_START_MIN = Number(process.env.FAST_AFTER_START_MIN || 60);
+const FAST_AM_HOUR = Number(process.env.FAST_AM_HOUR ?? 1);
+const TZ_OFFSET_HOURS = Number(process.env.TZ_OFFSET_HOURS ?? 9); // KST = UTC+9
+
 // 타이머 누락/재시작 대비 주기적 점검 간격
 const SWEEP_INTERVAL_MS = 4000;
 
-module.exports = { DOCK_DEFS, ASSIGN_DELAY_SEC, BREAK_DELAY_SEC, SWEEP_INTERVAL_MS };
+module.exports = {
+  DOCK_DEFS, ASSIGN_DELAY_SEC, BREAK_DELAY_SEC, SWEEP_INTERVAL_MS,
+  FAST_ASSIGN_DELAY_SEC, FAST_AFTER_START_MIN, FAST_AM_HOUR, TZ_OFFSET_HOURS,
+};

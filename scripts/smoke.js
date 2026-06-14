@@ -7,6 +7,7 @@ delete process.env.SUPABASE_URL;
 delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 delete process.env.SUPABASE_ANON_KEY;
 process.env.ASSIGN_DELAY_SEC = '1';
+process.env.FAST_ASSIGN_DELAY_SEC = '1'; // 첫1시간 빠른윈도우에 걸려도 동일하게
 process.env.BREAK_DELAY_SEC = '2';
 
 const engine = require('../src/engine');

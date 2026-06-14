@@ -16,10 +16,13 @@ function render(s) {
   }
   notice.classList.add('hidden');
 
+  const fastBadge = s.fastMode
+    ? ' · <b class="text-orange-600">⚡ 빠른배정 중(바로바로)</b>'
+    : ` · 배정 ${s.assignDelaySec}s / 휴게 ${s.breakDelaySec}s`;
   document.getElementById('summary').innerHTML =
     `가동 <b>${s.stats.active}</b> · 비가동 <b>${s.stats.inactive}</b> · ` +
     `작업중 <b>${s.stats.working}</b> · 대기 <b class="text-amber-600">${s.stats.waiting}</b> · ` +
-    `휴게중 <b class="text-blue-600">${s.stats.onBreak}</b> · 배정 ${s.assignDelaySec}s / 휴게 ${s.breakDelaySec}s`;
+    `휴게중 <b class="text-blue-600">${s.stats.onBreak}</b>${fastBadge}`;
 
   // 다른 도크로 보낼 때 쓸 옵션(가동 도크들)
   const activeDocks = s.docks.filter((d) => d.active);
