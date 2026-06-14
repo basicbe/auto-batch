@@ -17,7 +17,7 @@ function render(s) {
   notice.classList.add('hidden');
 
   const fastBadge = s.fastMode
-    ? ' · <b class="text-orange-600">⚡ 빠른배정 중(바로바로)</b>'
+    ? ' · <b class="text-orange-600">⚡ 빠른배정 중</b>'
     : ` · 배정 ${s.assignDelaySec}s / 휴게 ${s.breakDelaySec}s`;
   document.getElementById('summary').innerHTML =
     `가동 <b>${s.stats.active}</b> · 비가동 <b>${s.stats.inactive}</b> · ` +

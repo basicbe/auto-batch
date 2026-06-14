@@ -81,13 +81,6 @@ document.getElementById('allOn').addEventListener('click', () => {
   syncRows();
 });
 
-document.getElementById('fillNums').addEventListener('click', () => {
-  let n = 1;
-  document.querySelectorAll('.dock-on').forEach((cb) => {
-    if (cb.checked) document.querySelector(`.dock-name[data-id="${cb.dataset.id}"]`).value = '작업자' + (n++);
-  });
-});
-
 document.getElementById('save').addEventListener('click', async () => {
   const active = [];
   const roster = [];
