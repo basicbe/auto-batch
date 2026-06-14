@@ -6,7 +6,8 @@ process.env.ASSIGN_DELAY_SEC = '480';
 process.env.FAST_ASSIGN_DELAY_SEC = '1';
 process.env.FAST_HIGHLIGHT_SEC = '120';
 process.env.FAST_AFTER_START_MIN = '60';
-process.env.FAST_AM_HOUR = '1';
+process.env.FAST_AFTER_MEAL_MIN = '60';
+process.env.MEAL_END = '01:00';
 process.env.TZ_OFFSET_HOURS = '9';
 
 const engine = require('../src/engine');
@@ -21,13 +22,14 @@ const DAY_AGO = NOON - 24 * 3600 * 1000;
 const M = 60 * 1000;
 
 (async () => {
-  // --- ① 윈도우 판정 ---
-  check(engine.isFastWindow(NOON + 5 * M, NOON) === true, '시작 5분 뒤 → 빠른윈도우(첫1시간)');
-  check(engine.isFastWindow(NOON + 90 * M, NOON) === false, '시작 90분 뒤(낮) → 평소');
-  check(engine.isFastWindow(AM_0130, DAY_AGO) === true, 'KST 01:30 → 빠른윈도우');
-  check(engine.isFastWindow(AM_0230, DAY_AGO) === false, 'KST 02:30 → 평소');
-  check(engine.assignDelaySecFor(NOON + 5 * M, NOON) === 1, '빠른윈도우 지연 = 설정값(1초)');
-  check(engine.assignDelaySecFor(NOON + 90 * M, NOON) === 480, '평소 지연 = 480초');
+  // --- ① 윈도우 판정 (밥 끝 01:00 → 빠른배정 01:00~02:00) ---
+  const ME = 60; // 밥 끝 시각(분) = 01:00
+  check(engine.isFastWindow(NOON + 5 * M, NOON, ME) === true, '시작 5분 뒤 → 빠른윈도우(첫1시간)');
+  check(engine.isFastWindow(NOON + 90 * M, NOON, ME) === false, '시작 90분 뒤(낮) → 평소');
+  check(engine.isFastWindow(AM_0130, DAY_AGO, ME) === true, '밥 직후 01:30 → 빠른윈도우');
+  check(engine.isFastWindow(AM_0230, DAY_AGO, ME) === false, '밥 1시간 지난 02:30 → 평소');
+  check(engine.assignDelaySecFor(NOON + 5 * M, NOON, ME) === 1, '빠른윈도우 지연 = 설정값(1초)');
+  check(engine.assignDelaySecFor(NOON + 90 * M, NOON, ME) === 480, '평소 지연 = 480초');
 
   // --- ② 세팅 변경 시 휴게 작업자 보존 ---
   engine.setBroadcast(() => {});
@@ -70,6 +72,14 @@ const M = 60 * 1000;
   check(kang && kang.status === 'working', '빠른배정으로 강 재배정됨');
   const remain = (kang && kang.returningUntil ? kang.returningUntil : 0) - Date.now();
   check(Math.abs(remain - 120000) < 8000, `빠른배정 강조 ≈ 2분 유지 (실제 ${Math.round(remain / 1000)}초) ★`);
+
+  // --- ⑤ 밥시간 바꾸면 빠른배정 구간도 따라 이동 ---
+  engine.reset();
+  engine.setup({ active: ['B22'], roster: [{ dockId: 'B22', workerName: '한' }], startedAt: Date.UTC(2020, 0, 1, 3, 0, 0), mealStart: '12:00', mealEnd: '13:00' });
+  const meMin = engine.hhmmToMin(engine.getState().mealEnd);
+  check(engine.getState().mealEnd === '13:00', '밥시간(끝) 13:00 으로 저장됨 ★');
+  check(engine.isFastWindow(Date.UTC(2020, 0, 1, 4, 30, 0), null, meMin) === true, '밥 직후 13:30 → 빠른배정 ★');
+  check(engine.isFastWindow(Date.UTC(2020, 0, 1, 5, 30, 0), null, meMin) === false, '밥 1시간 뒤 14:30 → 평소');
 
   engine.reset();
   report();

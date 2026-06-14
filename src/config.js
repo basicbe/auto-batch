@@ -17,11 +17,14 @@ const BREAK_DELAY_SEC = Number(process.env.BREAK_DELAY_SEC || 10 * 60);
 // 빠른 배정 윈도우: 아래 구간에 휴게가 시작되면 배정을 ASSIGN_DELAY_SEC 대신
 // FAST_ASSIGN_DELAY_SEC(기본 4초)로 — "바로바로" 배치.
 //   ① 작업 시작 후 FAST_AFTER_START_MIN 분 이내 (기본 60분)
-//   ② 한국시간(KST) FAST_AM_HOUR 시대 (기본 1 → 01:00~01:59). 서버가 해외여도 KST 기준.
+//   ② 밥시간 직후 FAST_AFTER_MEAL_MIN 분 (KST). 기본 밥 00:00~01:00 → 빠른배정 01:00~02:00.
+//      밥시간은 세팅에서 수정 가능(state.mealStart/mealEnd). 아래는 기본값. 서버가 해외여도 KST 기준.
 const FAST_ASSIGN_DELAY_SEC = Number(process.env.FAST_ASSIGN_DELAY_SEC || 4);
 const FAST_HIGHLIGHT_SEC = Number(process.env.FAST_HIGHLIGHT_SEC || 120); // 빠른배정 시 "→ 이동" 강조 유지(초, 기본 2분)
 const FAST_AFTER_START_MIN = Number(process.env.FAST_AFTER_START_MIN || 60);
-const FAST_AM_HOUR = Number(process.env.FAST_AM_HOUR ?? 1);
+const FAST_AFTER_MEAL_MIN = Number(process.env.FAST_AFTER_MEAL_MIN || 60); // 밥시간 직후 빠른배정 길이(분)
+const MEAL_START_DEFAULT = process.env.MEAL_START || '00:00';
+const MEAL_END_DEFAULT = process.env.MEAL_END || '01:00';
 const TZ_OFFSET_HOURS = Number(process.env.TZ_OFFSET_HOURS ?? 9); // KST = UTC+9
 
 // 타이머 누락/재시작 대비 주기적 점검 간격
@@ -29,5 +32,6 @@ const SWEEP_INTERVAL_MS = 4000;
 
 module.exports = {
   DOCK_DEFS, ASSIGN_DELAY_SEC, BREAK_DELAY_SEC, SWEEP_INTERVAL_MS,
-  FAST_ASSIGN_DELAY_SEC, FAST_HIGHLIGHT_SEC, FAST_AFTER_START_MIN, FAST_AM_HOUR, TZ_OFFSET_HOURS,
+  FAST_ASSIGN_DELAY_SEC, FAST_HIGHLIGHT_SEC, FAST_AFTER_START_MIN, FAST_AFTER_MEAL_MIN,
+  MEAL_START_DEFAULT, MEAL_END_DEFAULT, TZ_OFFSET_HOURS,
 };

@@ -11,6 +11,18 @@ function toLocalInput(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// 밥 끝 시각 → 빠른배정 구간(직후 1시간) 표시
+function updateFastHint() {
+  const me = document.getElementById('mealEnd').value;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(me || '');
+  const hint = document.getElementById('fastWindowHint');
+  if (!m) { hint.textContent = '—'; return; }
+  const start = (Number(m[1]) % 24) * 60 + Number(m[2]);
+  const end = (start + 60) % 1440;
+  const fmt = (x) => String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0');
+  hint.textContent = `${me} ~ ${fmt(end)}`;
+}
+
 function build(s) {
   docks = s.docks;
   const zones = {};
@@ -42,6 +54,12 @@ function build(s) {
 
   // 작업 시작 시각 미리 채우기 (진행 중이면 기존 값, 아니면 지금)
   document.getElementById('startAt').value = toLocalInput(s.startedAt || Date.now());
+
+  // 밥시간 미리 채우기 + 빠른배정 구간 표시
+  document.getElementById('mealStart').value = s.mealStart || '00:00';
+  document.getElementById('mealEnd').value = s.mealEnd || '01:00';
+  document.getElementById('mealEnd').addEventListener('input', updateFastHint);
+  updateFastHint();
 
   built = true;
 }
@@ -84,7 +102,9 @@ document.getElementById('save').addEventListener('click', async () => {
 
   const startVal = document.getElementById('startAt').value;
   const startedAt = startVal ? new Date(startVal).getTime() : Date.now();
-  const r = await act('setup:save', { active, roster, startedAt });
+  const mealStart = document.getElementById('mealStart').value || '00:00';
+  const mealEnd = document.getElementById('mealEnd').value || '01:00';
+  const r = await act('setup:save', { active, roster, startedAt, mealStart, mealEnd });
   if (r.ok) {
     msg.textContent = `저장됨! 가동 ${active.length}개, 작업자 ${roster.length}명. 관리 현황판으로 이동합니다…`;
     msg.className = 'text-sm text-green-600';

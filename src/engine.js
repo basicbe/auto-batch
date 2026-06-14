@@ -26,7 +26,11 @@ function freshState() {
   config.DOCK_DEFS.forEach(([id, zone], i) => {
     docks[id] = { id, zone, order: i, active: false, status: 'inactive', workerId: null, freedAt: null };
   });
-  return { configured: false, startedAt: null, docks, workers: {}, events: [], seq: 0 };
+  return {
+    configured: false, startedAt: null,
+    mealStart: config.MEAL_START_DEFAULT, mealEnd: config.MEAL_END_DEFAULT,
+    docks, workers: {}, events: [], seq: 0,
+  };
 }
 
 async function init() {
@@ -70,7 +74,7 @@ function getState() {
     .map((w) => ({
       id: w.id, name: w.name, status: w.status, dockId: w.dockId,
       breakStartedAt: w.breakStartedAt || null,
-      assignAt: w.breakStartedAt ? w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000 : null,
+      assignAt: w.breakStartedAt ? w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt, currentMealEndMin()) * 1000 : null,
       returnAt: w.breakStartedAt ? w.breakStartedAt + config.BREAK_DELAY_SEC * 1000 : null,
       returningUntil: w.returningUntil || null,
       updatedAt: w.updatedAt || 0,
@@ -83,7 +87,11 @@ function getState() {
     serverNow: Date.now(),
     assignDelaySec: config.ASSIGN_DELAY_SEC,
     breakDelaySec: config.BREAK_DELAY_SEC,
-    fastMode: isFastWindow(Date.now(), state.startedAt),
+    fastMode: isFastWindow(Date.now(), state.startedAt, currentMealEndMin()),
+    mealStart: state.mealStart || config.MEAL_START_DEFAULT,
+    mealEnd: state.mealEnd || config.MEAL_END_DEFAULT,
+    fastMealStart: minToHHMM(currentMealEndMin()),
+    fastMealEnd: minToHHMM(currentMealEndMin() + config.FAST_AFTER_MEAL_MIN),
     docks,
     workers,
     stats: {
@@ -101,7 +109,7 @@ function getState() {
 // ---- 명령 ----
 
 // 하루 세팅: active = 가동 도크 id 배열, roster = [{dockId, workerName}]
-function setup({ active, roster, startedAt } = {}) {
+function setup({ active, roster, startedAt, mealStart, mealEnd } = {}) {
   if (!Array.isArray(active) || active.length === 0) throw new Error('가동 도크를 1개 이상 선택하세요');
 
   // 휴게/복귀대기 중인 작업자는 세팅 폼에 안 보이므로 보존(인원 변경 시 사라지지 않게).
@@ -116,6 +124,8 @@ function setup({ active, roster, startedAt } = {}) {
     Object.values(prev.docks).forEach((d) => { if (d.status === 'waiting' && d.freedAt) prevFreed[d.id] = d.freedAt; });
   }
   const keepStartedAt = prev && prev.configured ? prev.startedAt : null; // 진행 중이면 시작시각 유지
+  const keepMealStart = prev && prev.configured ? prev.mealStart : null;
+  const keepMealEnd = prev && prev.configured ? prev.mealEnd : null;
 
   for (const id of [...timers.keys()]) clearTimer(id);
 
@@ -123,6 +133,8 @@ function setup({ active, roster, startedAt } = {}) {
   state.configured = true;
   const sa = Number(startedAt);
   state.startedAt = Number.isFinite(sa) ? sa : (keepStartedAt || Date.now()); // 세팅에서 지정한 시작 시각 우선
+  state.mealStart = hhmmToMin(mealStart) != null ? mealStart : (keepMealStart || config.MEAL_START_DEFAULT);
+  state.mealEnd = hhmmToMin(mealEnd) != null ? mealEnd : (keepMealEnd || config.MEAL_END_DEFAULT); // 밥 끝 시각 → 직후 1시간 빠른배정
 
   active.forEach((id) => {
     const d = state.docks[id];
@@ -209,21 +221,43 @@ function reset() {
 
 // ---- 내부 로직 ----
 
-// 빠른 배정 윈도우(작업 시작 1시간 이내 또는 KST 새벽 1~2시)면 짧은 지연을 쓴다.
-function isFastWindow(t, startedAt) {
-  if (startedAt && t - startedAt < config.FAST_AFTER_START_MIN * 60 * 1000) return true;
-  const kstHour = new Date(t + config.TZ_OFFSET_HOURS * 3600 * 1000).getUTCHours();
-  return kstHour === config.FAST_AM_HOUR;
+// 시:분(KST) 유틸
+function hhmmToMin(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+  return m ? (Number(m[1]) % 24) * 60 + Number(m[2]) : null;
 }
-function assignDelaySecFor(t, startedAt) {
-  return isFastWindow(t, startedAt) ? config.FAST_ASSIGN_DELAY_SEC : config.ASSIGN_DELAY_SEC;
+function minToHHMM(min) {
+  const x = ((Math.round(min) % 1440) + 1440) % 1440;
+  return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0');
+}
+function kstMinutesOfDay(t) {
+  const d = new Date(t + config.TZ_OFFSET_HOURS * 3600 * 1000);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+// min(분)이 [start, start+len) 안에 있나 — 자정 넘김 처리
+function inDailyRange(min, start, len) {
+  if (start == null) return false;
+  return ((((min - start) % 1440) + 1440) % 1440) < len;
+}
+function currentMealEndMin() {
+  const m = hhmmToMin(state && state.mealEnd);
+  return m != null ? m : hhmmToMin(config.MEAL_END_DEFAULT);
+}
+
+// 빠른 배정 윈도우: ① 작업 시작 1시간 이내, 또는 ② 밥시간 직후 1시간(KST). mealEndMin = 밥 끝나는 시각(분).
+function isFastWindow(t, startedAt, mealEndMin) {
+  if (startedAt && t - startedAt < config.FAST_AFTER_START_MIN * 60 * 1000) return true;
+  return inDailyRange(kstMinutesOfDay(t), mealEndMin, config.FAST_AFTER_MEAL_MIN);
+}
+function assignDelaySecFor(t, startedAt, mealEndMin) {
+  return isFastWindow(t, startedAt, mealEndMin) ? config.FAST_ASSIGN_DELAY_SEC : config.ASSIGN_DELAY_SEC;
 }
 
 function scheduleAssign(workerId) {
   clearTimer(workerId);
   const w = state.workers[workerId];
   if (!w || w.status !== 'break') return;
-  const ms = Math.max(0, w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000 - Date.now());
+  const ms = Math.max(0, w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt, currentMealEndMin()) * 1000 - Date.now());
   timers.set(workerId, setTimeout(() => markReady(workerId), ms));
 }
 
@@ -236,7 +270,7 @@ function clearTimer(workerId) {
 function markReady(workerId) {
   const w = state.workers[workerId];
   if (!w || w.status !== 'break') return;
-  const due = w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000;
+  const due = w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt, currentMealEndMin()) * 1000;
   if (Date.now() < due - 200) { scheduleAssign(workerId); return; } // 너무 이름 → 다시 예약
   w.status = 'ready'; w.readyAt = due;
   clearTimer(workerId);
@@ -250,7 +284,7 @@ function markReadyDue() {
   let changed = false;
   for (const w of Object.values(state.workers)) {
     if (w.status !== 'break') continue;
-    const due = w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt) * 1000;
+    const due = w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt, currentMealEndMin()) * 1000;
     if (now >= due) {
       w.status = 'ready';
       w.readyAt = due;
@@ -286,7 +320,7 @@ function assign(worker, dock) {
   worker.dockId = dock.id; worker.status = 'working';
   // "→ 이동" 강조 유지: 빠른배정이면 배정 후 FAST_HIGHLIGHT_SEC(기본 2분), 아니면 복귀 예정(휴게 시작+10분)까지
   worker.returningUntil = bs
-    ? (isFastWindow(bs, state.startedAt) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + config.BREAK_DELAY_SEC * 1000)
+    ? (isFastWindow(bs, state.startedAt, currentMealEndMin()) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + config.BREAK_DELAY_SEC * 1000)
     : null;
   worker.breakStartedAt = null; worker.readyAt = null; worker.updatedAt = Date.now();
   clearTimer(worker.id);
@@ -306,4 +340,4 @@ function logEvent(type, data) {
 function persistAndEmit() { db.save(state); emit(); }
 function emit() { try { broadcast(getState()); } catch (e) { console.error('[engine] emit 실패:', e.message); } }
 
-module.exports = { init, setBroadcast, getState, setup, endWork, manualAssign, reset, isFastWindow, assignDelaySecFor };
+module.exports = { init, setBroadcast, getState, setup, endWork, manualAssign, reset, isFastWindow, assignDelaySecFor, hhmmToMin };

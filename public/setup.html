@@ -21,6 +21,16 @@
       <p class="text-xs text-slate-500 mt-1">이 시각부터 1시간 동안은 빠른 배정(4초)이 적용됩니다.</p>
     </div>
 
+    <div class="mb-5 bg-white rounded-2xl shadow p-4">
+      <label class="block text-sm font-semibold mb-1">밥시간</label>
+      <div class="flex items-center gap-2">
+        <input type="time" id="mealStart" class="border rounded-lg px-3 py-2 text-sm" />
+        <span class="text-slate-400">~</span>
+        <input type="time" id="mealEnd" class="border rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <p class="text-xs text-slate-500 mt-1">밥시간이 끝난 뒤 1시간이 빠른 배정 구간 → <b id="fastWindowHint" class="text-orange-600">—</b></p>
+    </div>
+
     <div class="flex flex-wrap gap-2 mb-5 text-sm">
       <button id="allOn" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300">전체 가동</button>
       <button id="fillNums" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300">이름 빠른채움(1,2,3…)</button>
