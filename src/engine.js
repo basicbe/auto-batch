@@ -110,6 +110,11 @@ function setup({ active, roster, startedAt } = {}) {
   const rosterNames = new Set((roster || []).map((r) => (r.workerName || '').trim()).filter(Boolean));
   const preserved = (prev && prev.workers ? Object.values(prev.workers) : [])
     .filter((w) => (w.status === 'break' || w.status === 'ready') && !rosterNames.has(w.name));
+  // 이전에 대기 중이던 도크의 freedAt(끝난 시각) 보존 → 대기시간·FIFO 순서 유지
+  const prevFreed = {};
+  if (prev && prev.docks) {
+    Object.values(prev.docks).forEach((d) => { if (d.status === 'waiting' && d.freedAt) prevFreed[d.id] = d.freedAt; });
+  }
   const keepStartedAt = prev && prev.configured ? prev.startedAt : null; // 진행 중이면 시작시각 유지
 
   for (const id of [...timers.keys()]) clearTimer(id);
@@ -121,7 +126,7 @@ function setup({ active, roster, startedAt } = {}) {
 
   active.forEach((id) => {
     const d = state.docks[id];
-    if (d) { d.active = true; d.status = 'waiting'; d.freedAt = Date.now(); }
+    if (d) { d.active = true; d.status = 'waiting'; d.freedAt = prevFreed[id] || Date.now(); }
   });
 
   let n = 1;

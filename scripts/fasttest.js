@@ -37,7 +37,9 @@ const M = 60 * 1000;
     roster: [{ dockId: 'B22', workerName: '김' }, { dockId: 'B23', workerName: '이' }, { dockId: 'B24', workerName: '박' }],
   });
   engine.endWork('B22'); // 김 → 휴게 (B22는 비어 폼에 안 보임)
-  check(engine.getState().workers.find((w) => w.name === '김').status === 'break', '김 휴게중');
+  const before = engine.getState();
+  check(before.workers.find((w) => w.name === '김').status === 'break', '김 휴게중');
+  const b22Before = before.docks.find((d) => d.id === 'B22').freedAt;
 
   // 인원 변경: 김 빠진 명단으로 다시 세팅 (B22는 비워둠)
   engine.setup({
@@ -49,6 +51,8 @@ const M = 60 * 1000;
   check(!!kim, '세팅 변경 후에도 김(휴게중) 보존됨 ★');
   check(kim && kim.status === 'break', '김 여전히 휴게 상태 유지');
   check(s.workers.length === 3, '작업자 3명 유지(이·박·김)');
+  const b22After = s.docks.find((d) => d.id === 'B22').freedAt;
+  check(!!b22Before && b22After === b22Before, '세팅 변경 후 B22 대기시간(freedAt) 유지 ★');
 
   // --- ③ 세팅에서 시작 시각 지정 ---
   engine.reset();
