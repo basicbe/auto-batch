@@ -101,7 +101,7 @@ function getState() {
 // ---- 명령 ----
 
 // 하루 세팅: active = 가동 도크 id 배열, roster = [{dockId, workerName}]
-function setup({ active, roster } = {}) {
+function setup({ active, roster, startedAt } = {}) {
   if (!Array.isArray(active) || active.length === 0) throw new Error('가동 도크를 1개 이상 선택하세요');
 
   // 휴게/복귀대기 중인 작업자는 세팅 폼에 안 보이므로 보존(인원 변경 시 사라지지 않게).
@@ -116,7 +116,8 @@ function setup({ active, roster } = {}) {
 
   state = freshState();
   state.configured = true;
-  state.startedAt = keepStartedAt || Date.now();
+  const sa = Number(startedAt);
+  state.startedAt = Number.isFinite(sa) ? sa : (keepStartedAt || Date.now()); // 세팅에서 지정한 시작 시각 우선
 
   active.forEach((id) => {
     const d = state.docks[id];

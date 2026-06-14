@@ -4,6 +4,13 @@
 let docks = [];
 let built = false;
 
+// 타임스탬프 → datetime-local 입력값(브라우저 로컬시간 = 관리자 폰 기준)
+function toLocalInput(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function build(s) {
   docks = s.docks;
   const zones = {};
@@ -32,6 +39,10 @@ function build(s) {
 
   root.querySelectorAll('.dock-on').forEach((cb) => cb.addEventListener('change', syncRows));
   syncRows();
+
+  // 작업 시작 시각 미리 채우기 (진행 중이면 기존 값, 아니면 지금)
+  document.getElementById('startAt').value = toLocalInput(s.startedAt || Date.now());
+
   built = true;
 }
 
@@ -71,7 +82,9 @@ document.getElementById('save').addEventListener('click', async () => {
   const msg = document.getElementById('msg');
   if (!active.length) { msg.textContent = '가동 도크를 1개 이상 선택하세요'; msg.className = 'text-sm text-red-600'; return; }
 
-  const r = await act('setup:save', { active, roster });
+  const startVal = document.getElementById('startAt').value;
+  const startedAt = startVal ? new Date(startVal).getTime() : Date.now();
+  const r = await act('setup:save', { active, roster, startedAt });
   if (r.ok) {
     msg.textContent = `저장됨! 가동 ${active.length}개, 작업자 ${roster.length}명. 관리 현황판으로 이동합니다…`;
     msg.className = 'text-sm text-green-600';

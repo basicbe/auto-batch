@@ -50,6 +50,12 @@ const M = 60 * 1000;
   check(kim && kim.status === 'break', '김 여전히 휴게 상태 유지');
   check(s.workers.length === 3, '작업자 3명 유지(이·박·김)');
 
+  // --- ③ 세팅에서 시작 시각 지정 ---
+  engine.reset();
+  const customStart = Date.UTC(2024, 5, 1, 0, 0, 0);
+  engine.setup({ active: ['B22'], roster: [{ dockId: 'B22', workerName: '홍' }], startedAt: customStart });
+  check(engine.getState().startedAt === customStart, '세팅에서 지정한 시작 시각이 반영됨 ★');
+
   engine.reset();
   report();
 })();
