@@ -284,8 +284,10 @@ function assign(worker, dock) {
   const bs = worker.breakStartedAt;
   dock.status = 'working'; dock.workerId = worker.id; dock.freedAt = null;
   worker.dockId = dock.id; worker.status = 'working';
-  // 배정은 8분에 났지만 실제 복귀는 10분 → 그 사이 "복귀중"으로 표시
-  worker.returningUntil = bs ? bs + config.BREAK_DELAY_SEC * 1000 : null;
+  // "→ 이동" 강조 유지: 빠른배정이면 배정 후 FAST_HIGHLIGHT_SEC(기본 2분), 아니면 복귀 예정(휴게 시작+10분)까지
+  worker.returningUntil = bs
+    ? (isFastWindow(bs, state.startedAt) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + config.BREAK_DELAY_SEC * 1000)
+    : null;
   worker.breakStartedAt = null; worker.readyAt = null; worker.updatedAt = Date.now();
   clearTimer(worker.id);
   logEvent('assign', { dockId: dock.id, workerId: worker.id, worker: worker.name });

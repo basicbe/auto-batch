@@ -3,7 +3,8 @@ delete process.env.DATABASE_URL;
 delete process.env.SUPABASE_URL;
 delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 process.env.ASSIGN_DELAY_SEC = '480';
-process.env.FAST_ASSIGN_DELAY_SEC = '4';
+process.env.FAST_ASSIGN_DELAY_SEC = '1';
+process.env.FAST_HIGHLIGHT_SEC = '120';
 process.env.FAST_AFTER_START_MIN = '60';
 process.env.FAST_AM_HOUR = '1';
 process.env.TZ_OFFSET_HOURS = '9';
@@ -25,7 +26,7 @@ const M = 60 * 1000;
   check(engine.isFastWindow(NOON + 90 * M, NOON) === false, '시작 90분 뒤(낮) → 평소');
   check(engine.isFastWindow(AM_0130, DAY_AGO) === true, 'KST 01:30 → 빠른윈도우');
   check(engine.isFastWindow(AM_0230, DAY_AGO) === false, 'KST 02:30 → 평소');
-  check(engine.assignDelaySecFor(NOON + 5 * M, NOON) === 4, '빠른윈도우 지연 = 4초');
+  check(engine.assignDelaySecFor(NOON + 5 * M, NOON) === 1, '빠른윈도우 지연 = 설정값(1초)');
   check(engine.assignDelaySecFor(NOON + 90 * M, NOON) === 480, '평소 지연 = 480초');
 
   // --- ② 세팅 변경 시 휴게 작업자 보존 ---
@@ -59,6 +60,16 @@ const M = 60 * 1000;
   const customStart = Date.UTC(2024, 5, 1, 0, 0, 0);
   engine.setup({ active: ['B22'], roster: [{ dockId: 'B22', workerName: '홍' }], startedAt: customStart });
   check(engine.getState().startedAt === customStart, '세팅에서 지정한 시작 시각이 반영됨 ★');
+
+  // --- ④ 빠른배정 시 "→ 이동" 강조 ≈ 2분(FAST_HIGHLIGHT_SEC) ---
+  engine.reset();
+  engine.setup({ active: ['B22', 'B23'], roster: [{ dockId: 'B22', workerName: '강' }, { dockId: 'B23', workerName: '윤' }], startedAt: Date.now() });
+  engine.endWork('B22'); // 강 → 휴게 (첫1시간=빠른윈도우, 1초 뒤 배정)
+  await new Promise((r) => setTimeout(r, 1200));
+  const kang = engine.getState().workers.find((w) => w.name === '강');
+  check(kang && kang.status === 'working', '빠른배정으로 강 재배정됨');
+  const remain = (kang && kang.returningUntil ? kang.returningUntil : 0) - Date.now();
+  check(Math.abs(remain - 120000) < 8000, `빠른배정 강조 ≈ 2분 유지 (실제 ${Math.round(remain / 1000)}초) ★`);
 
   engine.reset();
   report();

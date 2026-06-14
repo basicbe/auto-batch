@@ -19,6 +19,7 @@ const BREAK_DELAY_SEC = Number(process.env.BREAK_DELAY_SEC || 10 * 60);
 //   ① 작업 시작 후 FAST_AFTER_START_MIN 분 이내 (기본 60분)
 //   ② 한국시간(KST) FAST_AM_HOUR 시대 (기본 1 → 01:00~01:59). 서버가 해외여도 KST 기준.
 const FAST_ASSIGN_DELAY_SEC = Number(process.env.FAST_ASSIGN_DELAY_SEC || 4);
+const FAST_HIGHLIGHT_SEC = Number(process.env.FAST_HIGHLIGHT_SEC || 120); // 빠른배정 시 "→ 이동" 강조 유지(초, 기본 2분)
 const FAST_AFTER_START_MIN = Number(process.env.FAST_AFTER_START_MIN || 60);
 const FAST_AM_HOUR = Number(process.env.FAST_AM_HOUR ?? 1);
 const TZ_OFFSET_HOURS = Number(process.env.TZ_OFFSET_HOURS ?? 9); // KST = UTC+9
@@ -28,5 +29,5 @@ const SWEEP_INTERVAL_MS = 4000;
 
 module.exports = {
   DOCK_DEFS, ASSIGN_DELAY_SEC, BREAK_DELAY_SEC, SWEEP_INTERVAL_MS,
-  FAST_ASSIGN_DELAY_SEC, FAST_AFTER_START_MIN, FAST_AM_HOUR, TZ_OFFSET_HOURS,
+  FAST_ASSIGN_DELAY_SEC, FAST_HIGHLIGHT_SEC, FAST_AFTER_START_MIN, FAST_AM_HOUR, TZ_OFFSET_HOURS,
 };
