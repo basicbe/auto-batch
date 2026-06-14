@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>세팅 · 자동 배치</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800">
+  <div class="max-w-4xl mx-auto px-5 py-8">
+    <div class="flex items-center justify-between mb-1">
+      <h1 class="text-2xl font-bold">세팅</h1>
+      <a href="/" class="text-sm text-slate-500 hover:underline">← 홈</a>
+    </div>
+    <p class="text-slate-500 mb-5 text-sm">가동할 도크를 켜고(체크), 각 도크의 시작 작업자 이름을 입력하세요. 체크 해제 = 오늘 비가동.</p>
+
+    <div class="flex flex-wrap gap-2 mb-5 text-sm">
+      <button id="allOn" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300">전체 가동</button>
+      <button id="fillNums" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300">이름 빠른채움(1,2,3…)</button>
+      <span id="liveCount" class="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium"></span>
+    </div>
+
+    <div id="zones" class="grid gap-6 sm:grid-cols-2"></div>
+
+    <div class="mt-6 flex items-center gap-3">
+      <button id="save" class="px-5 py-2.5 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700">세팅 저장 &amp; 시작</button>
+      <span id="msg" class="text-sm"></span>
+    </div>
+  </div>
+
+  <script src="/common.js"></script>
+  <script src="/setup.js"></script>
+</body>
+</html>

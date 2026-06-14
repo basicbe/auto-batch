@@ -1,0 +1,28 @@
+{
+  "name": "auto-batch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "물류 도크 작업자 자동 배치 시스템 (MVP)",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "demo": "ASSIGN_DELAY_SEC=8 BREAK_DELAY_SEC=12 node --env-file-if-exists=.env src/server.js",
+    "smoke": "node scripts/smoke.js",
+    "itest": "node scripts/itest.js",
+    "db:test": "node --env-file-if-exists=.env scripts/db-test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.1",
+    "express": "^4.19.2",
+    "pg": "^8.21.0",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
+  }
+}
