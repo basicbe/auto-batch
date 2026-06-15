@@ -2,6 +2,7 @@
 /* global onState, act, startCountdowns, srvNow, fmt */
 
 let cur = null;
+let selectedZone = null; // 현황판에서 보고 있는 구역(1번/2번 대형)
 
 function render(s) {
   cur = s;
@@ -9,6 +10,7 @@ function render(s) {
   if (!s.configured) {
     notice.classList.remove('hidden');
     notice.innerHTML = '아직 세팅 전입니다. <a class="underline" href="/setup.html">세팅하러 가기 →</a>';
+    document.getElementById('zoneTabs').innerHTML = '';
     document.getElementById('grid').innerHTML = '';
     document.getElementById('breaks').innerHTML = '';
     document.getElementById('summary').textContent = '';
@@ -27,22 +29,30 @@ function render(s) {
   // 다른 도크로 보낼 때 쓸 옵션(가동 도크들)
   const activeDocks = s.docks.filter((d) => d.active);
 
-  const grid = document.getElementById('grid');
-  grid.innerHTML = '';
-  // 구역(1번/2번 대형)별로 나눠서 표시
+  // 구역(1번/2번 대형) 탭 — 선택한 구역의 도크만 표시
   const zones = {};
   s.docks.forEach((d) => { (zones[d.zone] = zones[d.zone] || []).push(d); });
-  Object.keys(zones).sort().forEach((zone) => {
-    const sec = document.createElement('div');
-    sec.className = 'mb-4';
-    sec.innerHTML = `<h3 class="font-semibold text-slate-600 text-sm mb-2">${zone}</h3>`;
-    const z = document.createElement('div');
-    z.className = 'grid gap-2';
-    z.style.gridTemplateColumns = 'repeat(auto-fill, minmax(130px, 1fr))'; // 320px에서도 한 줄 2개+
-    zones[zone].forEach((d) => z.appendChild(dockCard(d, activeDocks)));
-    sec.appendChild(z);
-    grid.appendChild(sec);
+  const zoneNames = Object.keys(zones).sort();
+  if (!selectedZone || !zones[selectedZone]) selectedZone = zoneNames[0];
+
+  const tabs = document.getElementById('zoneTabs');
+  tabs.innerHTML = '';
+  zoneNames.forEach((zone) => {
+    const b = document.createElement('button');
+    b.className = 'zone-tab px-4 py-1.5 rounded-lg text-sm font-medium ' +
+      (zone === selectedZone ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300');
+    b.textContent = zone;
+    b.dataset.zone = zone;
+    tabs.appendChild(b);
   });
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  const z = document.createElement('div');
+  z.className = 'grid gap-2';
+  z.style.gridTemplateColumns = 'repeat(auto-fill, minmax(130px, 1fr))'; // 320px에서도 한 줄 2개+
+  (zones[selectedZone] || []).forEach((d) => z.appendChild(dockCard(d, activeDocks)));
+  grid.appendChild(z);
 
   const breaks = document.getElementById('breaks');
   const out = s.workers.filter((w) => w.status === 'break' || w.status === 'ready');
@@ -112,6 +122,14 @@ document.getElementById('grid').addEventListener('change', async (e) => {
   const r = await act('worker:reassign', { workerId: sel.dataset.worker, dockId: sel.value });
   if (!r.ok) alert('오류: ' + r.error);
   sel.value = '';
+});
+
+// 구역 탭 클릭 → 그 구역만 보기
+document.getElementById('zoneTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('.zone-tab');
+  if (!b) return;
+  selectedZone = b.dataset.zone;
+  if (cur) render(cur);
 });
 
 document.getElementById('reset').addEventListener('click', async () => {
