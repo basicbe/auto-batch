@@ -29,7 +29,20 @@ function render(s) {
 
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
-  s.docks.forEach((d) => grid.appendChild(dockCard(d, activeDocks)));
+  // 구역(1번/2번 대형)별로 나눠서 표시
+  const zones = {};
+  s.docks.forEach((d) => { (zones[d.zone] = zones[d.zone] || []).push(d); });
+  Object.keys(zones).sort().forEach((zone) => {
+    const sec = document.createElement('div');
+    sec.className = 'mb-4';
+    sec.innerHTML = `<h3 class="font-semibold text-slate-600 text-sm mb-2">${zone}</h3>`;
+    const z = document.createElement('div');
+    z.className = 'grid gap-2';
+    z.style.gridTemplateColumns = 'repeat(auto-fill, minmax(130px, 1fr))'; // 320px에서도 한 줄 2개+
+    zones[zone].forEach((d) => z.appendChild(dockCard(d, activeDocks)));
+    sec.appendChild(z);
+    grid.appendChild(sec);
+  });
 
   const breaks = document.getElementById('breaks');
   const out = s.workers.filter((w) => w.status === 'break' || w.status === 'ready');
