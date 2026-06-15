@@ -55,7 +55,9 @@ function render(s) {
   grid.appendChild(z);
 
   const breaks = document.getElementById('breaks');
-  const out = s.workers.filter((w) => w.status === 'break' || w.status === 'ready');
+  const out = s.workers
+    .filter((w) => w.status === 'break' || w.status === 'ready')
+    .sort((a, b) => (a.assignAt || 0) - (b.assignAt || 0)); // 배정까지 남은 시간 짧은 순(위로)
   breaks.innerHTML = out.length ? '' : '<div class="text-slate-400 text-sm">휴게 중인 작업자 없음</div>';
   out.forEach((w) => breaks.appendChild(breakCard(w)));
 }
