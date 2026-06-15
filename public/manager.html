@@ -11,10 +11,11 @@
   <div class="max-w-6xl mx-auto px-4 py-6">
     <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
       <h1 class="text-2xl font-bold">관리 현황판</h1>
-      <div class="flex items-center gap-2 text-sm">
-        <a href="/board.html" target="_blank" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300">📺 공용 보드 열기</a>
-        <a href="/setup.html" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300">⚙️ 세팅</a>
-        <button id="reset" class="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">하루 리셋</button>
+      <div class="flex items-center gap-1.5 text-sm flex-wrap">
+        <a href="/board.html" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition">📺 공용 보드</a>
+        <a href="/signal.html" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition">🚦 신호수 알림</a>
+        <a href="/setup.html" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition">⚙️ 세팅</a>
+        <button id="reset" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-red-200 text-red-600 shadow-sm hover:bg-red-50 transition">↻ 하루 리셋</button>
       </div>
     </div>
 
@@ -22,7 +23,7 @@
     <div id="notice" class="mb-4 hidden text-sm bg-amber-50 text-amber-700 rounded-xl px-4 py-3"></div>
 
     <h2 class="font-semibold text-slate-500 text-sm mb-2">도크 (종료할 도크의 버튼을 누르세요)</h2>
-    <div id="zoneTabs" class="flex gap-2 mb-3"></div>
+    <div id="zoneTabs" class="inline-flex bg-slate-200 rounded-xl p-1 mb-4"></div>
     <div id="grid" class="mb-7"></div>
 
     <h2 class="font-semibold text-slate-500 text-sm mb-2">휴게 · 복귀</h2>

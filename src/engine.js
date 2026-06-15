@@ -29,7 +29,7 @@ function freshState() {
   return {
     configured: false, startedAt: null,
     mealStart: config.MEAL_START_DEFAULT, mealEnd: config.MEAL_END_DEFAULT,
-    docks, workers: {}, events: [], seq: 0,
+    docks, workers: {}, events: [], acks: {}, seq: 0,
   };
 }
 
@@ -44,6 +44,7 @@ async function init() {
   for (const w of Object.values(state.workers)) {
     if (w.returningUntil === undefined) w.returningUntil = null;
   }
+  if (!state.acks) state.acks = {}; // 구버전 저장 상태 보강
 
   // 진행 중이던 휴게 타이머 복구
   for (const w of Object.values(state.workers)) {
@@ -77,6 +78,7 @@ function getState() {
       assignAt: w.breakStartedAt ? w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt, currentMealEndMin()) * 1000 : null,
       returnAt: w.breakStartedAt ? w.breakStartedAt + config.BREAK_DELAY_SEC * 1000 : null,
       returningUntil: w.returningUntil || null,
+      lastDockId: w.lastDockId || null,
       updatedAt: w.updatedAt || 0,
     }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
@@ -94,6 +96,7 @@ function getState() {
     fastMealEnd: minToHHMM(currentMealEndMin() + config.FAST_AFTER_MEAL_MIN),
     docks,
     workers,
+    recentEnds: recentEndEvents(), // 신호수 화면용: 최근 종료된 도크(최신 먼저)
     stats: {
       total: docks.length,
       active: docks.filter((d) => d.active).length,
@@ -104,6 +107,18 @@ function getState() {
       ready: workers.filter((w) => w.status === 'ready').length,
     },
   };
+}
+
+// 신호수 화면용: 최근 '종료' 이벤트를 최신 순으로 최대 limit개. 도크 번호만 필요.
+function recentEndEvents(limit = 20) {
+  const evs = state.events || [];
+  const out = [];
+  for (let i = evs.length - 1; i >= 0 && out.length < limit; i--) {
+    const e = evs[i];
+    if (e.type !== 'end') continue;
+    out.push({ seq: e.seq, ts: e.ts, dockId: e.dockId, acked: !!(state.acks && state.acks[e.seq]) });
+  }
+  return out;
 }
 
 // ---- 명령 ----
@@ -148,7 +163,7 @@ function setup({ active, roster, startedAt, mealStart, mealEnd } = {}) {
     const d = state.docks[dockId];
     if (!d || !d.active) return;
     const id = 'w' + (n++);
-    state.workers[id] = { id, name, status: 'working', dockId, breakStartedAt: null, readyAt: null, returningUntil: null, updatedAt: Date.now() };
+    state.workers[id] = { id, name, status: 'working', dockId, breakStartedAt: null, readyAt: null, returningUntil: null, lastDockId: null, updatedAt: Date.now() };
     d.status = 'working'; d.workerId = id; d.freedAt = null;
   });
 
@@ -173,11 +188,53 @@ function endWork(dockId) {
 
   const w = state.workers[d.workerId];
   d.status = 'waiting'; d.freedAt = Date.now(); d.workerId = null;
-  w.status = 'break'; w.dockId = null; w.breakStartedAt = Date.now(); w.readyAt = null; w.returningUntil = null; w.updatedAt = Date.now();
+  w.status = 'break'; w.dockId = null; w.breakStartedAt = Date.now(); w.readyAt = null; w.returningUntil = null; w.lastDockId = dockId; w.updatedAt = Date.now();
 
   scheduleAssign(w.id);
   logEvent('end', { dockId, workerId: w.id, worker: w.name });
   tryMatch(); // 이미 복귀 준비된 작업자가 있으면 이 도크를 바로 가져갈 수 있음
+  persistAndEmit();
+}
+
+// 도크 종료를 잘못 눌렀을 때 되돌리기: 휴게 중인 작업자를 방금 나온 도크로 복귀.
+// 작업자가 아직 '휴게'(재배정 전)이고 그 도크가 여전히 대기(빈)일 때만 가능.
+// 잘못 기록된 종료 이벤트와 신호수 확인표시도 지워 신호수 화면에서 사라지게 한다.
+function undoEnd(workerId) {
+  ensureConfigured();
+  const w = state.workers[workerId];
+  if (!w) throw new Error('없는 작업자');
+  if (w.status !== 'break') throw new Error('휴게 시작 직후에만 되돌릴 수 있어요(이미 배정이 진행됨 — 자리 변경을 쓰세요)');
+  const d = w.lastDockId && state.docks[w.lastDockId];
+  if (!d) throw new Error('되돌릴 도크를 찾을 수 없습니다');
+  if (d.status !== 'waiting' || d.workerId) throw new Error(d.id + ' 에 이미 다른 작업자가 들어가 되돌릴 수 없습니다(자리 변경을 쓰세요)');
+
+  clearTimer(w.id);
+  d.status = 'working'; d.workerId = w.id; d.freedAt = null;
+  w.status = 'working'; w.dockId = d.id; w.breakStartedAt = null; w.readyAt = null; w.returningUntil = null; w.lastDockId = null; w.updatedAt = Date.now();
+
+  // 가장 최근의 잘못된 종료 이벤트 + 그 확인표시 제거
+  for (let i = state.events.length - 1; i >= 0; i--) {
+    const e = state.events[i];
+    if (e.type === 'end' && e.workerId === w.id && e.dockId === d.id) {
+      if (state.acks) delete state.acks[e.seq];
+      state.events.splice(i, 1);
+      break;
+    }
+  }
+  logEvent('undo_end', { dockId: d.id, workerId: w.id, worker: w.name });
+  persistAndEmit();
+}
+
+// 신호수 화면의 '확인'/'되돌리기' — 서버 공유 상태(state.acks[seq]). seq = 종료 이벤트 번호.
+// 읽기 화면용이라 관리자 인증 없이 허용. 존재하는 종료 이벤트만 허용(임의 키 주입 방지).
+function ackEnd(seq, acked = true) {
+  const n = Number(seq);
+  if (!Number.isFinite(n)) throw new Error('잘못된 seq');
+  if (!state.acks) state.acks = {};
+  const exists = (state.events || []).some((e) => e.type === 'end' && e.seq === n);
+  if (!exists) return; // 목록에서 사라진 이벤트면 조용히 무시
+  if (acked) state.acks[n] = Date.now();
+  else delete state.acks[n];
   persistAndEmit();
 }
 
@@ -322,7 +379,7 @@ function assign(worker, dock) {
   worker.returningUntil = bs
     ? (isFastWindow(bs, state.startedAt, currentMealEndMin()) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + config.BREAK_DELAY_SEC * 1000)
     : null;
-  worker.breakStartedAt = null; worker.readyAt = null; worker.updatedAt = Date.now();
+  worker.breakStartedAt = null; worker.readyAt = null; worker.lastDockId = null; worker.updatedAt = Date.now();
   clearTimer(worker.id);
   logEvent('assign', { dockId: dock.id, workerId: worker.id, worker: worker.name });
 }
@@ -340,4 +397,4 @@ function logEvent(type, data) {
 function persistAndEmit() { db.save(state); emit(); }
 function emit() { try { broadcast(getState()); } catch (e) { console.error('[engine] emit 실패:', e.message); } }
 
-module.exports = { init, setBroadcast, getState, setup, endWork, manualAssign, reset, isFastWindow, assignDelaySecFor, hhmmToMin };
+module.exports = { init, setBroadcast, getState, setup, endWork, undoEnd, manualAssign, reset, ackEnd, isFastWindow, assignDelaySecFor, hhmmToMin };

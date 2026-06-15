@@ -20,12 +20,21 @@ function render() {
     stat.textContent = '';
     return;
   }
-  stat.innerHTML = `가동 ${s.stats.active} · 휴게중 ${s.stats.onBreak} · 대기도크 ${s.stats.waiting}`;
+  stat.innerHTML =
+    chip('가동', s.stats.active, 'bg-slate-700/60 text-slate-200') +
+    chip('휴게중', s.stats.onBreak, 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/30') +
+    chip('대기 도크', s.stats.waiting, 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30');
 
   // 최근에 배정/변경된 작업자가 맨 위로 (동률이면 이름순)
   const ws = [...s.workers].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || (a.name || '').localeCompare(b.name || '', 'ko'));
   board.innerHTML = '';
   ws.forEach((w) => board.appendChild(card(w, now)));
+}
+
+// 상단 현황 칩 (320px에서도 줄바꿈으로 깔끔하게)
+function chip(label, n, cls) {
+  return `<span class="inline-flex items-baseline gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${cls}">
+    <span>${label}</span><b class="text-base font-extrabold tabular-nums">${n}</b></span>`;
 }
 
 function card(w, now) {

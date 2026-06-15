@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#020617" />
+  <title>신호수 알림 · 도크 완료</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    @keyframes pulseRing { 0%,100%{ box-shadow:0 0 0 0 rgba(251,191,36,.75) } 50%{ box-shadow:0 0 0 16px rgba(251,191,36,0) } }
+    @keyframes pop { 0%{ transform:scale(.85); opacity:0 } 60%{ transform:scale(1.03) } 100%{ transform:scale(1); opacity:1 } }
+    /* 새로 들어온 종료 카드: 한 번 팝 + 계속 펄스 (한 선언에 합쳐야 둘 다 적용됨) */
+    .fresh { animation: pop .35s ease-out, pulseRing 1.4s ease-out infinite; }
+  </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen select-none">
+  <!-- 상단 고정 바 -->
+  <header class="sticky top-0 z-20 bg-slate-950/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center gap-3">
+    <div class="text-xl font-extrabold tracking-tight flex items-center gap-1.5">🚦 <span>신호수 알림</span></div>
+    <div class="ml-auto flex items-center gap-3">
+      <div id="clock" class="font-mono text-slate-400 text-sm tabular-nums"></div>
+      <button id="soundBtn" class="text-2xl leading-none active:scale-90 transition" title="소리 켜기/끄기">🔔</button>
+      <span id="conn" class="w-2.5 h-2.5 rounded-full bg-slate-600" title="연결 상태"></span>
+    </div>
+  </header>
+
+  <main class="px-3 py-3 max-w-md mx-auto">
+    <div id="subhead" class="text-slate-500 text-xs mb-2 px-1 h-4"></div>
+    <div id="list" class="space-y-2.5"></div>
+  </main>
+
+  <!-- 시작 오버레이: 모바일은 소리·진동을 켜려면 사용자 탭이 한 번 필요 -->
+  <div id="start" class="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center px-8 text-center">
+    <div class="text-7xl mb-5">🚦</div>
+    <div class="text-2xl font-extrabold mb-2">신호수 알림</div>
+    <p class="text-slate-400 mb-8 leading-relaxed">도크 작업이 끝나면<br/><b class="text-white">소리와 진동</b>으로 알려드립니다.</p>
+    <button id="startBtn" class="w-full max-w-xs py-4 rounded-2xl bg-amber-500 text-slate-950 text-lg font-extrabold active:scale-95 transition">시작하기</button>
+    <p class="text-slate-600 text-xs mt-4">화면을 켜 둔 채로 두세요.</p>
+  </div>
+
+  <script src="/common.js"></script>
+  <script src="/signal.js"></script>
+</body>
+</html>

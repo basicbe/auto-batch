@@ -8,15 +8,13 @@
   <script src="/socket.io/socket.io.js"></script>
 </head>
 <body class="bg-slate-900 min-h-screen text-white">
-  <div class="max-w-7xl mx-auto px-6 py-6">
-    <div class="flex items-center justify-between mb-5">
-      <h1 class="text-4xl font-extrabold tracking-tight">다음 작업 위치</h1>
-      <div class="text-right text-slate-400">
-        <div id="clock" class="text-2xl font-mono"></div>
-        <div id="stat" class="text-sm"></div>
-      </div>
+  <div class="max-w-7xl mx-auto px-4 py-5">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight">다음 작업 위치</h1>
+      <div id="clock" class="text-lg sm:text-xl lg:text-2xl font-mono text-slate-400 shrink-0 tabular-nums"></div>
     </div>
-    <div id="hint" class="text-slate-400 mb-4 text-lg">휴게 후 복귀하면 본인 이름 옆의 도크로 가세요.</div>
+    <div id="hint" class="text-slate-400 mb-3 text-sm sm:text-lg">휴게 후 복귀하면 본인 이름 옆의 도크로 가세요.</div>
+    <div id="stat" class="flex flex-wrap gap-2 mb-4"></div>
     <div id="board" class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"></div>
   </div>
 

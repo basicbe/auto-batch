@@ -33,7 +33,11 @@ io.on('connection', (socket) => {
   socket.on('setup:save', (p, ack) => guarded(socket, ack, () => engine.setup(p)));
   socket.on('dock:end', (p, ack) => guarded(socket, ack, () => engine.endWork(p && p.dockId)));
   socket.on('worker:reassign', (p, ack) => guarded(socket, ack, () => engine.manualAssign(p && p.workerId, p && p.dockId)));
+  socket.on('worker:undo-end', (p, ack) => guarded(socket, ack, () => engine.undoEnd(p && p.workerId)));
   socket.on('day:reset', (_p, ack) => guarded(socket, ack, () => engine.reset()));
+
+  // 신호수 '확인'은 인증 없이 허용(읽기 화면용 공유 표시 — 한 명이 확인하면 전 화면 반영)
+  socket.on('signal:ack', (p, ack) => respond(ack, () => engine.ackEnd(p && p.seq, p && p.acked)));
 });
 
 function respond(ack, fn) {
