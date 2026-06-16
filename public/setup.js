@@ -61,6 +61,9 @@ function build(s) {
   document.getElementById('mealEnd').addEventListener('input', updateFastHint);
   updateFastHint();
 
+  // 특공대 명단 미리 채우기
+  document.getElementById('commandos').value = (s.commandos || []).map((c) => c.name).join(', ');
+
   built = true;
 }
 
@@ -97,7 +100,9 @@ document.getElementById('save').addEventListener('click', async () => {
   const startedAt = startVal ? new Date(startVal).getTime() : Date.now();
   const mealStart = document.getElementById('mealStart').value || '00:00';
   const mealEnd = document.getElementById('mealEnd').value || '01:00';
-  const r = await act('setup:save', { active, roster, startedAt, mealStart, mealEnd });
+  const commandos = document.getElementById('commandos').value
+    .split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+  const r = await act('setup:save', { active, roster, commandos, startedAt, mealStart, mealEnd });
   if (r.ok) {
     msg.textContent = `저장됨! 가동 ${active.length}개, 작업자 ${roster.length}명. 관리 현황판으로 이동합니다…`;
     msg.className = 'text-sm text-green-600';

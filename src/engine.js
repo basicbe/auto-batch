@@ -24,12 +24,12 @@ function setBroadcast(fn) { broadcast = fn; }
 function freshState() {
   const docks = {};
   config.DOCK_DEFS.forEach(([id, zone], i) => {
-    docks[id] = { id, zone, order: i, active: false, status: 'inactive', workerId: null, freedAt: null };
+    docks[id] = { id, zone, order: i, active: false, status: 'inactive', workerId: null, freedAt: null, noTruck: false, temps: [] };
   });
   return {
     configured: false, startedAt: null,
     mealStart: config.MEAL_START_DEFAULT, mealEnd: config.MEAL_END_DEFAULT,
-    docks, workers: {}, events: [], acks: {}, seq: 0,
+    docks, workers: {}, commandos: {}, events: [], acks: {}, seq: 0,
   };
 }
 
@@ -39,12 +39,19 @@ async function init() {
 
   // config가 바뀌었을 수 있으니 누락 도크 보강
   config.DOCK_DEFS.forEach(([id, zone], i) => {
-    if (!state.docks[id]) state.docks[id] = { id, zone, order: i, active: false, status: 'inactive', workerId: null, freedAt: null };
+    if (!state.docks[id]) state.docks[id] = { id, zone, order: i, active: false, status: 'inactive', workerId: null, freedAt: null, noTruck: false, temps: [] };
+    else { // 구버전 저장 상태 보강
+      const d = state.docks[id];
+      if (d.noTruck === undefined) d.noTruck = false;
+      if (!Array.isArray(d.temps)) d.temps = d.temp ? [d.temp] : []; // 단일 temp(구버전) → 배열
+      delete d.temp;
+    }
   });
   for (const w of Object.values(state.workers)) {
     if (w.returningUntil === undefined) w.returningUntil = null;
   }
   if (!state.acks) state.acks = {}; // 구버전 저장 상태 보강
+  if (!state.commandos) state.commandos = {}; // 특공대 풀(구버전 보강)
 
   // 진행 중이던 휴게 타이머 복구
   for (const w of Object.values(state.workers)) {
@@ -69,6 +76,8 @@ function getState() {
       workerId: d.workerId,
       worker: d.workerId && state.workers[d.workerId] ? state.workers[d.workerId].name : null,
       freedAt: d.freedAt,
+      noTruck: !!d.noTruck,
+      temps: d.temps || [], // 특공대 투입 오버레이 [{id,name}] 최대 2 (FIFO 무관)
     }));
 
   const workers = Object.values(state.workers)
@@ -81,6 +90,10 @@ function getState() {
       lastDockId: w.lastDockId || null,
       updatedAt: w.updatedAt || 0,
     }))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+
+  const commandos = Object.values(state.commandos || {})
+    .map((c) => ({ id: c.id, name: c.name, status: c.status, dockId: c.dockId || null }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
 
   return {
@@ -96,6 +109,7 @@ function getState() {
     fastMealEnd: minToHHMM(currentMealEndMin() + config.FAST_AFTER_MEAL_MIN),
     docks,
     workers,
+    commandos,
     recentEnds: recentEndEvents(), // 신호수 화면용: 최근 종료된 도크(최신 먼저)
     stats: {
       total: docks.length,
@@ -103,8 +117,11 @@ function getState() {
       inactive: docks.filter((d) => !d.active).length,
       working: docks.filter((d) => d.status === 'working').length,
       waiting: docks.filter((d) => d.status === 'waiting').length,
+      noTruck: docks.filter((d) => d.active && d.noTruck).length, // 차 없는(지연) 도크
       onBreak: workers.filter((w) => w.status === 'break').length,
       ready: workers.filter((w) => w.status === 'ready').length,
+      commandos: commandos.length,
+      commandoIn: commandos.filter((c) => c.status === 'in').length, // 도크 투입 중
     },
   };
 }
@@ -123,20 +140,27 @@ function recentEndEvents(limit = 20) {
 
 // ---- 명령 ----
 
-// 하루 세팅: active = 가동 도크 id 배열, roster = [{dockId, workerName}]
-function setup({ active, roster, startedAt, mealStart, mealEnd } = {}) {
+// 하루 세팅: active = 가동 도크 id 배열, roster = [{dockId, workerName}], commandos = [특공대 이름]
+function setup({ active, roster, commandos, startedAt, mealStart, mealEnd } = {}) {
   if (!Array.isArray(active) || active.length === 0) throw new Error('가동 도크를 1개 이상 선택하세요');
 
   // 휴게/복귀대기 중인 작업자는 세팅 폼에 안 보이므로 보존(인원 변경 시 사라지지 않게).
   // 단, 새 명단에 같은 이름이 있으면 그쪽을 우선(중복 방지).
   const prev = state;
+  const prevCmd = (prev && prev.commandos) ? Object.values(prev.commandos) : [];
+  // commandos 미전달(구버전 클라)이면 기존 명단 이름 유지
+  const cmdNames = Array.isArray(commandos) ? commandos : prevCmd.map((c) => c.name);
   const rosterNames = new Set((roster || []).map((r) => (r.workerName || '').trim()).filter(Boolean));
   const preserved = (prev && prev.workers ? Object.values(prev.workers) : [])
     .filter((w) => (w.status === 'break' || w.status === 'ready') && !rosterNames.has(w.name));
   // 이전에 대기 중이던 도크의 freedAt(끝난 시각) 보존 → 대기시간·FIFO 순서 유지
   const prevFreed = {};
+  const prevNoTruck = {};
   if (prev && prev.docks) {
-    Object.values(prev.docks).forEach((d) => { if (d.status === 'waiting' && d.freedAt) prevFreed[d.id] = d.freedAt; });
+    Object.values(prev.docks).forEach((d) => {
+      if (d.status === 'waiting' && d.freedAt) prevFreed[d.id] = d.freedAt;
+      if (d.noTruck) prevNoTruck[d.id] = true; // 차 없는(지연) 도크 표시 유지
+    });
   }
   const keepStartedAt = prev && prev.configured ? prev.startedAt : null; // 진행 중이면 시작시각 유지
   const keepMealStart = prev && prev.configured ? prev.mealStart : null;
@@ -153,7 +177,7 @@ function setup({ active, roster, startedAt, mealStart, mealEnd } = {}) {
 
   active.forEach((id) => {
     const d = state.docks[id];
-    if (d) { d.active = true; d.status = 'waiting'; d.freedAt = prevFreed[id] || Date.now(); }
+    if (d) { d.active = true; d.status = 'waiting'; d.freedAt = prevFreed[id] || Date.now(); d.noTruck = !!prevNoTruck[id]; }
   });
 
   let n = 1;
@@ -175,7 +199,24 @@ function setup({ active, roster, startedAt, mealStart, mealEnd } = {}) {
   });
   tryMatch(); // 복귀 준비된 보존 작업자가 빈 도크 잡도록
 
-  logEvent('setup', { active: active.length, workers: Object.keys(state.workers).length, preserved: preserved.length });
+  // 특공대 명단(별도 풀, FIFO 무관). 모두 idle로 재구성 후, 투입 중이던 인원은 배치 보존.
+  let cn = 1;
+  cmdNames.forEach((nm) => {
+    const name = (nm || '').trim();
+    if (!name) return;
+    const id = 'c' + (cn++);
+    state.commandos[id] = { id, name, status: 'idle', dockId: null };
+  });
+  prevCmd.forEach((pc) => {
+    if (pc.status !== 'in' || !pc.dockId) return;
+    const d = state.docks[pc.dockId];
+    if (!d || !d.active || d.status !== 'waiting' || d.temps.length >= 2) return; // 도크가 여전히 빈 대기 상태일 때만(최대 2)
+    const match = Object.values(state.commandos).find((c) => c.name === pc.name && c.status === 'idle');
+    if (!match) return;
+    match.status = 'in'; match.dockId = d.id; d.temps.push({ id: match.id, name: match.name });
+  });
+
+  logEvent('setup', { active: active.length, workers: Object.keys(state.workers).length, preserved: preserved.length, commandos: Object.keys(state.commandos).length });
   persistAndEmit();
 }
 
@@ -260,12 +301,103 @@ function manualAssign(workerId, dockId) {
     w.updatedAt = Date.now(); w2.updatedAt = Date.now();
     logEvent('swap', { a: w.name, b: w2.name, dockA: d.id, dockB: oldDock.id });
   } else {
-    // 빈(대기) 도크로 이동 → 원래 자리는 대기열로
-    oldDock.status = 'waiting'; oldDock.freedAt = Date.now(); oldDock.workerId = null;
-    d.status = 'working'; d.workerId = w.id; d.freedAt = null;
+    // 빈(대기) 도크로 이동 → 원래 자리는 대기열로.
+    // 떠난 도크는 (1) 원래 대기시간(freedAt) 보존 — 차 오면 제 순서로 복귀,
+    //          (2) 자동 '차 없음'으로 잠금 — 차 없어서 옮긴 것이므로 복귀자가 도로 꽂히는 도돌이표 방지.
+    //   → 차 도착하면 '차 도착'(setNoTruck false) 한 번으로 보존된 순서대로 배정 재개.
+    oldDock.status = 'waiting'; oldDock.workerId = null; oldDock.noTruck = true;
+    oldDock.freedAt = oldDock.freedAt || Date.now();
+    if (d.temps && d.temps.length) releaseTemp(d); // 특공대가 메꾸던 자리에 수동 배치 = 교대
+    d.status = 'working'; d.workerId = w.id; d.noTruck = false; // 옮겨 보낸 자리는 차 있는 도크
     w.dockId = d.id; w.returningUntil = null; w.updatedAt = Date.now();
     logEvent('move', { worker: w.name, from: oldDock.id, to: d.id });
   }
+  tryMatch();
+  persistAndEmit();
+}
+
+// 차 유무 깃발: 차 안 온(지연) 도크 표시. ON이면 tryMatch가 그 도크를 건너뜀(배정 제외).
+// waiting/working 어느 상태든 걸 수 있어, 배정이 깃발보다 먼저 됐어도 사후 처리 가능.
+// OFF로 풀면(차 도착) 보존된 freedAt 그대로 대기열 제 순서에 복귀.
+function setNoTruck(dockId, value) {
+  ensureConfigured();
+  const d = state.docks[dockId];
+  if (!d) throw new Error('없는 도크: ' + dockId);
+  if (!d.active) throw new Error('비가동 도크입니다');
+  d.noTruck = !!value;
+  if (d.status === 'waiting' && !d.freedAt) d.freedAt = Date.now(); // 정렬 안전망(NaN 방지)
+  logEvent('no_truck', { dockId, value: !!value });
+  tryMatch(); // 해제 시 그 도크가 다시 배정 대상이 됨
+  persistAndEmit();
+}
+
+// 차 없는 도크에 배정된(또는 서 있는) 작업자를 '대기 풀(ready)'로 빼기.
+// 옮길 차-도크가 없을 때 사용 — 차가 어디든 먼저 들어오는 도크로 FIFO가 순서대로 보냄.
+// 핵심: 도크를 noTruck으로 같이 잠가야 방금 뺀 작업자가 그 도크로 즉시 도로 꽂히지 않음(도돌이표 방지).
+function pullToStandby(workerId) {
+  ensureConfigured();
+  const w = state.workers[workerId];
+  if (!w) throw new Error('없는 작업자');
+  if (w.status !== 'working' || !w.dockId) throw new Error('작업 중인 작업자만 대기로 뺄 수 있습니다');
+  const d = state.docks[w.dockId];
+
+  // 도크: 대기 + 차 없음(noTruck) + 원래 대기시간(freedAt) 보존 → 차 올 때까지 배정 제외
+  d.status = 'waiting'; d.workerId = null; d.noTruck = true; d.freedAt = d.freedAt || Date.now();
+  // 작업자: 복귀 풀(ready)로, 원래 준비시각(readyAt) 보존(없으면 now) → 차 오는 도크로 제 순서대로
+  w.status = 'ready'; w.dockId = null; w.readyAt = w.readyAt || Date.now();
+  w.returningUntil = null; w.breakStartedAt = null; w.lastDockId = null; w.updatedAt = Date.now();
+  clearTimer(w.id);
+
+  logEvent('standby', { dockId: d.id, workerId: w.id, worker: w.name });
+  tryMatch(); // noTruck 도크엔 안 꽂히고, 차 있는 다른 대기도크가 있으면 거기로
+  persistAndEmit();
+}
+
+// ---- 특공대(별도 풀, FIFO 무관) ----
+
+// 특공대 투입: 빈 대기 도크에 특공대를 올려 메꾸게 함(temps 오버레이, 한 도크 최대 2명). 도크는 여전히
+// FIFO 대상이라 복귀자가 배정되면 그 자리에서 교대(assign에서 자동 처리). 차가 있어 메꾸는 것이므로 미접안 해제.
+function deployCommando(commandoId, dockId) {
+  ensureConfigured();
+  const c = state.commandos[commandoId];
+  if (!c) throw new Error('없는 특공대');
+  const d = state.docks[dockId];
+  if (!d) throw new Error('없는 도크: ' + dockId);
+  if (!d.active) throw new Error('비가동 도크입니다');
+  if (d.status === 'working' && d.workerId) throw new Error('작업자가 있는 도크입니다(빈 대기 도크에만 투입)');
+  if (!Array.isArray(d.temps)) d.temps = [];
+  if (d.temps.some((t) => t.id === c.id)) return; // 이미 이 도크에 투입됨
+  if (d.temps.length >= 2) throw new Error('한 도크에 특공대는 최대 2명입니다');
+  // 다른 도크에 투입돼 있었으면 거기서 빼고 이동
+  if (c.status === 'in' && c.dockId && c.dockId !== dockId) { const pd = state.docks[c.dockId]; if (pd && pd.temps) pd.temps = pd.temps.filter((t) => t.id !== c.id); }
+  d.temps.push({ id: c.id, name: c.name }); d.noTruck = false;
+  c.status = 'in'; c.dockId = d.id;
+  logEvent('commando_deploy', { dockId: d.id, commando: c.name });
+  tryMatch(); // 미접안 풀리며 배정 대상이 될 수 있음
+  persistAndEmit();
+}
+
+// 특공대 빼기(한 명): 그 특공대만 도크에서 빼 대기(idle)로. 도크는 오버레이만 줄고 대기 그대로(다른 특공대는 유지).
+function recallCommando(commandoId) {
+  ensureConfigured();
+  const c = state.commandos[commandoId];
+  if (!c) throw new Error('없는 특공대');
+  if (c.status === 'in' && c.dockId) { const d = state.docks[c.dockId]; if (d && d.temps) d.temps = d.temps.filter((t) => t.id !== c.id); }
+  c.status = 'idle'; c.dockId = null;
+  logEvent('commando_recall', { commando: c.name });
+  persistAndEmit();
+}
+
+// 도크 마무리(도크별 1개): 특공대가 그 도크 일을 끝낸 경우. 일반 '작업 종료'와 동일하게 처리 —
+// 특공대 전원 빠지고, 도크는 대기열로(freedAt=now, 대기시간 초기화) FIFO 재진입. 미접안 아님.
+function commandoFinish(dockId) {
+  ensureConfigured();
+  const d = state.docks[dockId];
+  if (!d) throw new Error('없는 도크: ' + dockId);
+  if (!d.temps || !d.temps.length) throw new Error('특공대가 투입된 도크가 아닙니다');
+  releaseTemp(d); // 특공대 전원 idle
+  d.status = 'waiting'; d.workerId = null; d.noTruck = false; d.freedAt = Date.now();
+  logEvent('end', { dockId: d.id, commando: true }); // 작업 종료와 동일(신호수 알림 포함)
   tryMatch();
   persistAndEmit();
 }
@@ -359,7 +491,7 @@ function tryMatch() {
   let changed = false;
   for (;;) {
     const dock = Object.values(state.docks)
-      .filter((d) => d.status === 'waiting')
+      .filter((d) => d.status === 'waiting' && !d.noTruck) // 차 없는(지연) 도크는 배정 제외
       .sort((a, b) => (a.freedAt - b.freedAt) || (a.order - b.order))[0];
     const worker = Object.values(state.workers)
       .filter((w) => w.status === 'ready')
@@ -371,15 +503,26 @@ function tryMatch() {
   return changed;
 }
 
+// 도크의 특공대 오버레이 전원 제거 + 그 특공대들을 대기(idle)로
+function releaseTemp(dock) {
+  if (!dock || !dock.temps || !dock.temps.length) return;
+  dock.temps.forEach((t) => { const c = state.commandos[t.id]; if (c) { c.status = 'idle'; c.dockId = null; } });
+  dock.temps = [];
+}
+
 function assign(worker, dock) {
   const bs = worker.breakStartedAt;
-  dock.status = 'working'; dock.workerId = worker.id; dock.freedAt = null;
+  // 특공대가 메꾸던 도크에 복귀자가 배정되면 = 교대(handover). 특공대 전원 빠짐.
+  if (dock.temps && dock.temps.length) { logEvent('commando_handover', { dockId: dock.id, commandos: dock.temps.map((t) => t.name), worker: worker.name }); releaseTemp(dock); }
+  // freedAt/readyAt은 일부러 지우지 않고 둔다(working 상태에선 아무도 안 읽음).
+  // → 나중에 차 없어서 '대기로 빼기/이동'할 때 도크의 원래 대기시간·작업자의 원래 준비시각을 복원할 수 있음.
+  dock.status = 'working'; dock.workerId = worker.id;
   worker.dockId = dock.id; worker.status = 'working';
   // "→ 이동" 강조 유지: 빠른배정이면 배정 후 FAST_HIGHLIGHT_SEC(기본 2분), 아니면 복귀 예정(휴게 시작+10분)까지
   worker.returningUntil = bs
     ? (isFastWindow(bs, state.startedAt, currentMealEndMin()) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + config.BREAK_DELAY_SEC * 1000)
     : null;
-  worker.breakStartedAt = null; worker.readyAt = null; worker.lastDockId = null; worker.updatedAt = Date.now();
+  worker.breakStartedAt = null; worker.lastDockId = null; worker.updatedAt = Date.now();
   clearTimer(worker.id);
   logEvent('assign', { dockId: dock.id, workerId: worker.id, worker: worker.name });
 }
@@ -397,4 +540,4 @@ function logEvent(type, data) {
 function persistAndEmit() { db.save(state); emit(); }
 function emit() { try { broadcast(getState()); } catch (e) { console.error('[engine] emit 실패:', e.message); } }
 
-module.exports = { init, setBroadcast, getState, setup, endWork, undoEnd, manualAssign, reset, ackEnd, isFastWindow, assignDelaySecFor, hhmmToMin };
+module.exports = { init, setBroadcast, getState, setup, endWork, undoEnd, manualAssign, setNoTruck, pullToStandby, deployCommando, recallCommando, commandoFinish, reset, ackEnd, isFastWindow, assignDelaySecFor, hhmmToMin };

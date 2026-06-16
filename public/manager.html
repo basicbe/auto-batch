@@ -19,7 +19,8 @@
       </div>
     </div>
 
-    <div id="summary" class="mb-4 text-sm text-slate-600 bg-white rounded-xl shadow px-4 py-2"></div>
+    <div id="summary" class="mb-2 text-sm text-slate-600 bg-white rounded-xl shadow px-4 py-2"></div>
+    <div id="queue" class="mb-4 text-xs bg-white rounded-xl shadow px-4 py-2 hidden"></div>
     <div id="notice" class="mb-4 hidden text-sm bg-amber-50 text-amber-700 rounded-xl px-4 py-3"></div>
 
     <h2 class="font-semibold text-slate-500 text-sm mb-2">도크 (종료할 도크의 버튼을 누르세요)</h2>
@@ -28,6 +29,9 @@
 
     <h2 class="font-semibold text-slate-500 text-sm mb-2">휴게 · 복귀</h2>
     <div id="breaks" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));"></div>
+
+    <h2 id="commandoTitle" class="font-semibold text-slate-500 text-sm mb-2 mt-7 hidden">🛠 특공대</h2>
+    <div id="commandos" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));"></div>
   </div>
 
   <script src="/common.js"></script>

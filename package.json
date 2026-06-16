@@ -13,8 +13,10 @@
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "demo": "ASSIGN_DELAY_SEC=8 BREAK_DELAY_SEC=12 FAST_ASSIGN_DELAY_SEC=8 FAST_HIGHLIGHT_SEC=4 node --env-file-if-exists=.env src/server.js",
     "smoke": "node scripts/smoke.js",
+    "specialtest": "node scripts/specialtest.js",
     "fasttest": "node scripts/fasttest.js",
     "itest": "node scripts/itest.js",
+    "cmdtest": "node scripts/cmdtest.js",
     "db:test": "node --env-file-if-exists=.env scripts/db-test.js"
   },
   "dependencies": {

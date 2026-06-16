@@ -34,6 +34,11 @@ io.on('connection', (socket) => {
   socket.on('dock:end', (p, ack) => guarded(socket, ack, () => engine.endWork(p && p.dockId)));
   socket.on('worker:reassign', (p, ack) => guarded(socket, ack, () => engine.manualAssign(p && p.workerId, p && p.dockId)));
   socket.on('worker:undo-end', (p, ack) => guarded(socket, ack, () => engine.undoEnd(p && p.workerId)));
+  socket.on('dock:no-truck', (p, ack) => guarded(socket, ack, () => engine.setNoTruck(p && p.dockId, p && p.value)));
+  socket.on('worker:standby', (p, ack) => guarded(socket, ack, () => engine.pullToStandby(p && p.workerId)));
+  socket.on('commando:deploy', (p, ack) => guarded(socket, ack, () => engine.deployCommando(p && p.commandoId, p && p.dockId)));
+  socket.on('commando:recall', (p, ack) => guarded(socket, ack, () => engine.recallCommando(p && p.commandoId)));
+  socket.on('commando:finish', (p, ack) => guarded(socket, ack, () => engine.commandoFinish(p && p.dockId)));
   socket.on('day:reset', (_p, ack) => guarded(socket, ack, () => engine.reset()));
 
   // 신호수 '확인'은 인증 없이 허용(읽기 화면용 공유 표시 — 한 명이 확인하면 전 화면 반영)

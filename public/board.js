@@ -23,12 +23,30 @@ function render() {
   stat.innerHTML =
     chip('가동', s.stats.active, 'bg-slate-700/60 text-slate-200') +
     chip('휴게중', s.stats.onBreak, 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/30') +
-    chip('대기 도크', s.stats.waiting, 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30');
+    chip('대기 도크', s.stats.waiting, 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30') +
+    (s.stats.noTruck ? chip('미접안', s.stats.noTruck, 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/30') : '') +
+    (s.stats.commandos ? chip('특공대', `${s.stats.commandoIn}/${s.stats.commandos}`, 'bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/30') : '');
+
+  // 특공대 투입 시간대(빠른배정의 반대 구간) 안내
+  const hint = document.getElementById('hint');
+  hint.innerHTML = (s.stats.commandos && !s.fastMode)
+    ? '🛠 <b class="text-violet-300">특공대 투입 시간대</b> · 휴게 후 복귀하면 본인 이름 옆의 도크로 가세요.'
+    : '휴게 후 복귀하면 본인 이름 옆의 도크로 가세요.';
 
   // 최근에 배정/변경된 작업자가 맨 위로 (동률이면 이름순)
   const ws = [...s.workers].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || (a.name || '').localeCompare(b.name || '', 'ko'));
   board.innerHTML = '';
   ws.forEach((w) => board.appendChild(card(w, now)));
+  // 투입 중인 특공대 카드 (보라색)
+  (s.commandos || []).filter((c) => c.status === 'in').forEach((c) => board.appendChild(commandoCard(c)));
+}
+
+function commandoCard(c) {
+  const el = document.createElement('div');
+  el.className = 'rounded-2xl bg-violet-900/40 border border-violet-600/50 px-5 py-4';
+  el.innerHTML = `<div class="text-2xl font-bold text-violet-100">🛠 특공대 ${c.name}</div>
+    <div class="mt-1"><span class="text-3xl font-mono font-black text-violet-200">${c.dockId}</span></div>`;
+  return el;
 }
 
 // 상단 현황 칩 (320px에서도 줄바꿈으로 깔끔하게)
