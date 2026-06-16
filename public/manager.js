@@ -141,16 +141,22 @@ function dockCard(d, activeDocks) {
     const uw = undoWorkerForDock(d.id);
     const nt = d.noTruck;
     const tmps = d.temps || [];
-    const tone = tmps.length ? 'text-violet-700' : nt ? 'text-rose-700' : 'text-amber-700';
+    const tone = nt ? 'text-rose-700' : tmps.length ? 'text-violet-700' : 'text-amber-700';
     let cls, statusLine, btns;
     if (tmps.length) { // 특공대가 메꾸는 중 (최대 2명)
-      cls = 'border border-violet-300 bg-violet-50';
-      statusLine = '<div class="mt-1 flex flex-col gap-0.5">' + tmps.map((t) => `
+      cls = nt ? 'border border-rose-300 bg-rose-50' : 'border border-violet-300 bg-violet-50';
+      const cmdRows = tmps.map((t) => `
           <div class="flex items-center justify-between gap-1">
             <span class="text-xs text-violet-700 truncate">🛠 특공대 ${t.name}</span>
             <button class="cmd-recall text-[11px] px-2 py-0.5 rounded bg-white border border-violet-300 text-violet-600 hover:bg-violet-50 shrink-0" data-commando="${t.id}">빼기</button>
-          </div>`).join('') + '</div>';
-      btns = `<button class="cmd-finish mt-auto w-full text-xs py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700" data-dock="${d.id}">마무리</button>`;
+          </div>`).join('');
+      statusLine = (nt ? '<div class="text-xs text-rose-600 mt-1">🚫 미접안 · 배정 제외</div>' : '')
+        + '<div class="mt-1 flex flex-col gap-0.5">' + cmdRows + '</div>';
+      // 마무리(특공대가 일 끝냄) + 미접안 토글(거의 끝난 도크는 잠가서 복귀자 배정/교대 방지 → 다른 도크 먼저)
+      btns = `<div class="mt-auto flex flex-col gap-1">
+           <button class="cmd-finish w-full text-xs py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700" data-dock="${d.id}">마무리</button>
+           <button class="notruck-btn w-full text-xs py-1.5 rounded-lg ${nt ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-white border border-rose-300 text-rose-600 hover:bg-rose-50'}" data-dock="${d.id}" data-val="${nt ? '0' : '1'}">${nt ? '🚚 차 도착 — 배정 재개' : '🚫 미접안'}</button>
+         </div>`;
     } else if (nt) { // 미접안
       cls = 'border border-rose-300 bg-rose-50';
       statusLine = '<div class="text-xs text-rose-600 mt-1">🚫 미접안 · 배정 제외</div>';
