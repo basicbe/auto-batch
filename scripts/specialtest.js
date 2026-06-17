@@ -88,19 +88,19 @@ const setup3 = () => engine.setup({
   assert(W('김').dockId === 'B22' && W('김').status === 'working', '김 B22 복귀 배정');
   assert(D('B22').temps.length === 0 && C('특공A').status === 'idle', '복귀자 배정 시 특공대 자동 교대(빠짐)');
 
-  // ── 시나리오 6: 특공대 마무리 = 일반 작업 종료(대기열 + 대기시간 초기화, 미접안 아님) ──
+  // ── 시나리오 6: 특공대 작업종료 = 일반 작업 종료(대기열 + 대기시간 초기화, 미접안 아님) ──
   engine.reset();
   engine.setup({ active: ['B22', 'B23', 'B24'], commandos: ['특공A'], roster: [
     { dockId: 'B22', workerName: '김' }, { dockId: 'B23', workerName: '이' }, { dockId: 'B24', workerName: '박' }] });
   engine.endWork('B22');
   const tF6 = D('B22').freedAt;
   engine.deployCommando(C('특공A').id, 'B22');
-  engine.commandoFinish('B22');             // 도크 마무리 (도크별)
-  assert(D('B22').temps.length === 0 && D('B22').noTruck === false, '마무리 → 오버레이 제거 + 미접안 아님');
-  assert(D('B22').status === 'waiting' && D('B22').freedAt >= tF6, '마무리 = 작업 종료(대기열 + 대기시간 초기화)');
+  engine.commandoFinish('B22');             // 도크 작업종료 (도크별)
+  assert(D('B22').temps.length === 0 && D('B22').noTruck === false, '작업종료 → 오버레이 제거 + 미접안 아님');
+  assert(D('B22').status === 'waiting' && D('B22').freedAt >= tF6, '작업종료 = 작업 종료(대기열 + 대기시간 초기화)');
   assert(C('특공A').status === 'idle', '특공A 대기로 복귀');
   await sleep(1300);                        // 김 ready → 일반 대기 도크라 배정됨
-  assert(W('김').dockId === 'B22' && W('김').status === 'working', '마무리 도크는 일반 대기 → 복귀자 배정됨');
+  assert(W('김').dockId === 'B22' && W('김').status === 'working', '작업종료 도크는 일반 대기 → 복귀자 배정됨');
 
   // ── 시나리오 7: 한 도크 최대 2명 + 빼기(한 명) + 투입 검증 ──
   engine.reset();

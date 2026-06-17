@@ -152,9 +152,9 @@ function dockCard(d, activeDocks) {
           </div>`).join('');
       statusLine = (nt ? '<div class="text-xs text-rose-600 mt-1">🚫 미접안 · 배정 제외</div>' : '')
         + '<div class="mt-1 flex flex-col gap-0.5">' + cmdRows + '</div>';
-      // 마무리(특공대가 일 끝냄) + 미접안 토글(거의 끝난 도크는 잠가서 복귀자 배정/교대 방지 → 다른 도크 먼저)
+      // 작업종료(특공대가 일 끝냄) + 미접안 토글(거의 끝난 도크는 잠가서 복귀자 배정/교대 방지 → 다른 도크 먼저)
       btns = `<div class="mt-auto flex flex-col gap-1">
-           <button class="cmd-finish w-full text-xs py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700" data-dock="${d.id}">마무리</button>
+           <button class="cmd-finish w-full text-xs py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700" data-dock="${d.id}">작업종료</button>
            <button class="notruck-btn w-full text-xs py-1.5 rounded-lg ${nt ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-white border border-rose-300 text-rose-600 hover:bg-rose-50'}" data-dock="${d.id}" data-val="${nt ? '0' : '1'}">${nt ? '🚚 차 도착 — 배정 재개' : '🚫 미접안'}</button>
          </div>`;
     } else if (nt) { // 미접안
@@ -190,7 +190,7 @@ function dockCard(d, activeDocks) {
       ${statusBadge}
     </div>
     <div class="text-sm font-medium mt-0.5 truncate">${d.worker || '—'}</div>
-    <button class="end-btn mt-auto w-full text-sm py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" data-dock="${d.id}">종료</button>
+    <button class="end-btn mt-auto w-full text-sm py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" data-dock="${d.id}">작업종료</button>
     <select class="reassign mt-1 w-full text-xs border rounded-lg px-1 py-1 text-slate-500" data-worker="${d.workerId}">
       <option value="">자리 변경…</option>${others}
     </select>
@@ -243,7 +243,7 @@ document.getElementById('grid').addEventListener('click', async (e) => {
   const cr = e.target.closest('.cmd-recall');
   if (cr) { await cmdBtn(cr, 'commando:recall', { commandoId: cr.dataset.commando }); return; }
   const cf = e.target.closest('.cmd-finish');
-  if (cf) { await cmdBtn(cf, 'commando:finish', { dockId: cf.dataset.dock }, '이 도크 일을 마무리할까요? (작업 종료처럼 대기열로 들어갑니다)'); return; }
+  if (cf) { await cmdBtn(cf, 'commando:finish', { dockId: cf.dataset.dock }, '이 도크 작업을 종료할까요? (대기열로 들어갑니다)'); return; }
   const btn = e.target.closest('.end-btn');
   if (!btn) return;
   btn.disabled = true;
@@ -272,7 +272,7 @@ async function cmdBtn(btn, ev, payload, confirmMsg) {
   if (!r.ok) { alert('오류: ' + r.error); btn.disabled = false; }
 }
 
-// 특공대 패널: 투입(select)·빼기 (마무리는 도크 카드에서)
+// 특공대 패널: 투입(select)·빼기 (작업종료는 도크 카드에서)
 document.getElementById('commandos').addEventListener('click', async (e) => {
   const recall = e.target.closest('.cmd-recall');
   if (recall) { await cmdBtn(recall, 'commando:recall', { commandoId: recall.dataset.commando }); return; }

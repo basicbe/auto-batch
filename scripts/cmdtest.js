@@ -1,5 +1,5 @@
 // 특공대 소켓 통합 테스트: 실행 중인 서버(ASSIGN_DELAY 길게 권장)에 붙어
-// 세팅(특공대 명단) → 투입 → 마무리(미접안)를 실제 소켓 경유로 검증한다.
+// 세팅(특공대 명단) → 투입 → 작업종료를 실제 소켓 경유로 검증한다.
 const { io } = require('socket.io-client');
 
 const PORT = process.env.PORT || 3000;
@@ -34,8 +34,8 @@ sock.on('connect', async () => {
   check(C('특공A').status === 'in' && C('특공A').dockId === 'B22', '특공A 투입중');
 
   const r2 = await emit('commando:finish', { dockId: 'B22' });
-  check(r2 && r2.ok, '마무리 ack ok');
-  check(D('B22').temps.length === 0 && D('B22').status === 'waiting' && !D('B22').noTruck, '마무리: 오버레이 제거 + 작업종료 방식(미접안 아님) (소켓)');
+  check(r2 && r2.ok, '작업종료 ack ok');
+  check(D('B22').temps.length === 0 && D('B22').status === 'waiting' && !D('B22').noTruck, '작업종료: 오버레이 제거 + 작업종료 방식(미접안 아님) (소켓)');
   check(C('특공A').status === 'idle', '특공A 대기로 복귀');
 
   // 한 도크에 2명 투입

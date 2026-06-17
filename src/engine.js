@@ -388,7 +388,7 @@ function recallCommando(commandoId) {
   persistAndEmit();
 }
 
-// 도크 마무리(도크별 1개): 특공대가 그 도크 일을 끝낸 경우. 일반 '작업 종료'와 동일하게 처리 —
+// 도크 작업종료(도크별 1개): 특공대가 그 도크 일을 끝낸 경우. 일반 '작업 종료'와 동일하게 처리 —
 // 특공대 전원 빠지고, 도크는 대기열로(freedAt=now, 대기시간 초기화) FIFO 재진입. 미접안 아님.
 function commandoFinish(dockId) {
   ensureConfigured();
