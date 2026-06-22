@@ -3,6 +3,7 @@
 
 let cur = null;
 let selectedZone = null; // 현황판에서 보고 있는 구역(1번/2번 대형)
+let selectedTab = 'docks'; // 상단 탭: 'docks'(작업종료) | 'commandos'(특공대) | 'breaks'(휴게중)
 
 function render(s) {
   cur = s;
@@ -10,6 +11,7 @@ function render(s) {
   if (!s.configured) {
     notice.classList.remove('hidden');
     notice.innerHTML = '아직 세팅 전입니다. <a class="underline" href="/setup.html">세팅하러 가기 →</a>';
+    document.getElementById('mainTabs').innerHTML = '';
     document.getElementById('zoneTabs').innerHTML = '';
     document.getElementById('grid').innerHTML = '';
     document.getElementById('breaks').innerHTML = '';
@@ -60,7 +62,7 @@ function render(s) {
     const waiting = zones[zone].filter((d) => d.active && d.status === 'waiting').length;
     const on = zone === selectedZone;
     const b = document.createElement('button');
-    b.className = 'zone-tab flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ' +
+    b.className = 'zone-tab flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors ' +
       (on ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700');
     b.dataset.zone = zone;
     b.innerHTML = `<span>${zone}</span>` + (waiting
@@ -84,13 +86,52 @@ function render(s) {
   breaks.innerHTML = out.length ? '' : '<div class="text-slate-400 text-sm">휴게 중인 작업자 없음</div>';
   out.forEach((w) => breaks.appendChild(breakCard(w)));
 
-  // 특공대 패널 (명단 있을 때만)
+  // 특공대 패널
   const cmds = s.commandos || [];
-  document.getElementById('commandoTitle').classList.toggle('hidden', cmds.length === 0);
   const cmdWrap = document.getElementById('commandos');
-  cmdWrap.innerHTML = '';
-  const deployTargets = s.docks.filter((d) => d.active && d.status === 'waiting' && (d.temps ? d.temps.length : 0) < 2);
+  cmdWrap.innerHTML = cmds.length ? '' : '<div class="text-slate-400 text-sm">등록된 특공대가 없습니다 (세팅에서 추가)</div>';
+  const deployTargets = s.docks.filter((d) => d.active && (d.status === 'waiting' || d.status === 'working') && (d.temps ? d.temps.length : 0) < 2);
   cmds.forEach((c) => cmdWrap.appendChild(commandoCard(c, deployTargets)));
+
+  renderMainTabs(s, out.length);
+}
+
+// 상단 탭(작업종료/특공대/휴게중) 렌더 + 선택 패널만 표시
+function renderMainTabs(s, breakCount) {
+  const cmds = s.commandos || [];
+  const TABS = [
+    { key: 'docks', label: '작업종료', icon: '🚚', badge: s.stats.waiting, tone: 'amber' },
+    { key: 'commandos', label: '특공대', icon: '🛠', badge: cmds.length ? `${s.stats.commandoIn}/${s.stats.commandos}` : 0, tone: 'violet' },
+    { key: 'breaks', label: '휴게중', icon: '☕', badge: breakCount, tone: 'blue' },
+  ];
+  // [활성 탭 배경/글씨, 활성 배지, 활성 시 하단 강조선]
+  const TONE = {
+    amber: { on: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200', badge: 'bg-amber-500 text-white' },
+    violet: { on: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200', badge: 'bg-violet-500 text-white' },
+    blue: { on: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200', badge: 'bg-blue-500 text-white' },
+  };
+  const tabsEl = document.getElementById('mainTabs');
+  tabsEl.innerHTML = '';
+  TABS.forEach((t) => {
+    const on = t.key === selectedTab;
+    const c = TONE[t.tone];
+    const b = document.createElement('button');
+    // min-w-0 + whitespace-nowrap: 좁은 화면(320px)에서 한글 라벨이 글자단위 세로 줄바꿈되는 것 방지
+    // 좁은 화면은 글씨↓·아이콘 숨김·패딩↓ 로 3개가 한 줄에 들어가게, 넓어지면(sm) 키움
+    b.className = 'main-tab flex-1 min-w-0 flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ' +
+      (on ? c.on : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50');
+    b.dataset.tab = t.key;
+    b.innerHTML =
+      `<span class="hidden sm:inline text-base leading-none ${on ? '' : 'grayscale opacity-60'}">${t.icon}</span>` +
+      `<span>${t.label}</span>` +
+      (t.badge
+        ? `<span class="text-[10px] sm:text-[11px] font-bold leading-none px-1.5 py-0.5 rounded-full ${on ? c.badge : 'bg-slate-200 text-slate-500'}">${t.badge}</span>`
+        : '');
+    tabsEl.appendChild(b);
+  });
+  document.getElementById('panel-docks').classList.toggle('hidden', selectedTab !== 'docks');
+  document.getElementById('panel-commandos').classList.toggle('hidden', selectedTab !== 'commandos');
+  document.getElementById('panel-breaks').classList.toggle('hidden', selectedTab !== 'breaks');
 }
 
 function commandoCard(c, targets) {
@@ -104,10 +145,15 @@ function commandoCard(c, targets) {
       <button class="cmd-recall mt-1 w-full text-[11px] px-2 py-1 rounded-lg bg-white border border-violet-300 text-violet-600 hover:bg-violet-50" data-commando="${c.id}">빼기</button>`;
     return el;
   }
-  // idle — 투입할 도크 선택 (도크당 최대 2명, 1명 차 있으면 표시)
-  const opts = targets.map((d) => `<option value="${d.id}">${d.id}${d.temps && d.temps.length ? ' (1명)' : ''}</option>`).join('');
+  // idle — 투입할 도크 선택 (대기/작업중 도크, 도크당 최대 2명)
+  const opts = targets.map((d) => {
+    const tag = d.status === 'working' ? ' · 작업중' : (d.noTruck ? ' · 미접안' : '');
+    const cnt = d.temps && d.temps.length ? ` · 🛠${d.temps.length}` : '';
+    return `<option value="${d.id}">${d.id}${tag}${cnt}</option>`;
+  }).join('');
+  const prev = c.lastDockId ? `<span class="text-[11px] font-normal text-slate-400">전위치 ${c.lastDockId}</span>` : '';
   el.className = 'rounded-xl bg-white border border-violet-200 px-3 py-2 shadow-sm';
-  el.innerHTML = `<div class="font-medium">🛠 ${c.name}</div>
+  el.innerHTML = `<div class="font-medium flex items-center justify-between gap-1"><span>🛠 ${c.name}</span>${prev}</div>
     <select class="cmd-deploy mt-1 w-full text-xs border rounded-lg px-1 py-1 text-slate-500" data-commando="${c.id}">
       <option value="">투입할 도크…</option>${opts}
     </select>`;
@@ -178,18 +224,26 @@ function dockCard(d, activeDocks) {
   }
   // working — 종료 버튼/자리변경은 mt-auto로 카드 하단에 고정
   const nt = d.noTruck;
+  const tmps = d.temps || [];
   el.className = base + (nt ? 'border border-rose-300 bg-rose-50/50 shadow-sm' : 'border border-emerald-300 bg-white shadow-sm');
   const others = activeDocks.filter((x) => x.id !== d.id)
     .map((x) => `<option value="${x.id}">${x.id} ${x.status === 'working' ? '(교대)' : x.status === 'waiting' ? '(빈자리)' : ''}</option>`).join('');
   const statusBadge = nt
     ? '<span class="text-[11px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">🚫 미접안</span>'
     : '<span class="text-[11px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">작업중</span>';
+  // 작업중 도크에 거들러 들어온 특공대(있으면) — 각자 빼기 가능
+  const cmdRows = tmps.length ? '<div class="mt-1 flex flex-col gap-0.5">' + tmps.map((t) => `
+        <div class="flex items-center justify-between gap-1">
+          <span class="text-xs text-violet-700 truncate">🛠 ${t.name}</span>
+          <button class="cmd-recall text-[11px] px-2 py-0.5 rounded bg-white border border-violet-300 text-violet-600 hover:bg-violet-50 shrink-0" data-commando="${t.id}">빼기</button>
+        </div>`).join('') + '</div>' : '';
   el.innerHTML = `
     <div class="flex justify-between items-center">
       <span class="font-mono font-bold">${d.id}</span>
       ${statusBadge}
     </div>
     <div class="text-sm font-medium mt-0.5 truncate">${d.worker || '—'}</div>
+    ${cmdRows}
     <button class="end-btn mt-auto w-full text-sm py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" data-dock="${d.id}">작업종료</button>
     <select class="reassign mt-1 w-full text-xs border rounded-lg px-1 py-1 text-slate-500" data-worker="${d.workerId}">
       <option value="">자리 변경…</option>${others}
@@ -291,6 +345,14 @@ document.getElementById('grid').addEventListener('change', async (e) => {
   const r = await act('worker:reassign', { workerId: sel.dataset.worker, dockId: sel.value });
   if (!r.ok) alert('오류: ' + r.error);
   sel.value = '';
+});
+
+// 상단 탭 클릭 → 해당 패널만 보기
+document.getElementById('mainTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('.main-tab');
+  if (!b) return;
+  selectedTab = b.dataset.tab;
+  if (cur) render(cur);
 });
 
 // 구역 탭 클릭 → 그 구역만 보기

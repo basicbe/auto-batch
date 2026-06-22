@@ -106,9 +106,12 @@ const setup3 = () => engine.setup({
   engine.reset();
   engine.setup({ active: ['B22', 'B23'], commandos: ['특공A', '특공B', '특공C'], roster: [
     { dockId: 'B22', workerName: '김' }, { dockId: 'B23', workerName: '이' }] });
-  let threw = false;
-  try { engine.deployCommando(C('특공A').id, 'B22'); } catch { threw = true; } // B22 작업중
-  assert(threw, '작업자 있는 도크엔 특공대 투입 거부');
+  // 작업중 도크(B22)에도 거들러 투입 가능 — 작업자/배정은 그대로, 오버레이만 추가
+  engine.deployCommando(C('특공A').id, 'B22');
+  assert(D('B22').status === 'working' && D('B22').workerId && D('B22').temps.length === 1,
+    '작업중 도크에 특공대 거들기 투입(작업자 유지 + 오버레이 추가)');
+  engine.recallCommando(C('특공A').id);     // 도로 빼기
+  assert(C('특공A').status === 'idle' && C('특공A').lastDockId === 'B22', '빼면 전위치(B22) 기록');
   engine.endWork('B23');                    // B23 대기로
   engine.deployCommando(C('특공A').id, 'B23');
   engine.deployCommando(C('특공B').id, 'B23');

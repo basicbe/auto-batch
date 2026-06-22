@@ -93,7 +93,7 @@ function getState() {
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
 
   const commandos = Object.values(state.commandos || {})
-    .map((c) => ({ id: c.id, name: c.name, status: c.status, dockId: c.dockId || null }))
+    .map((c) => ({ id: c.id, name: c.name, status: c.status, dockId: c.dockId || null, lastDockId: c.lastDockId || null }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
 
   return {
@@ -355,8 +355,9 @@ function pullToStandby(workerId) {
 
 // ---- 특공대(별도 풀, FIFO 무관) ----
 
-// 특공대 투입: 빈 대기 도크에 특공대를 올려 메꾸게 함(temps 오버레이, 한 도크 최대 2명). 도크는 여전히
-// FIFO 대상이라 복귀자가 배정되면 그 자리에서 교대(assign에서 자동 처리). 차가 있어 메꾸는 것이므로 미접안 해제.
+// 특공대 투입: 도크에 특공대를 올려 메꾸게/거들게 함(temps 오버레이, 한 도크 최대 2명).
+//  - 빈 대기 도크: 특공대가 메꿈. 여전히 FIFO 대상이라 복귀자가 배정되면 교대(assign에서 자동). 차 있음 → 미접안 해제.
+//  - 작업중 도크: 작업자 옆에서 거들기(인력 추가). 도크 상태/배정은 그대로 두고 오버레이만 추가.
 function deployCommando(commandoId, dockId) {
   ensureConfigured();
   const c = state.commandos[commandoId];
@@ -364,15 +365,15 @@ function deployCommando(commandoId, dockId) {
   const d = state.docks[dockId];
   if (!d) throw new Error('없는 도크: ' + dockId);
   if (!d.active) throw new Error('비가동 도크입니다');
-  if (d.status === 'working' && d.workerId) throw new Error('작업자가 있는 도크입니다(빈 대기 도크에만 투입)');
   if (!Array.isArray(d.temps)) d.temps = [];
   if (d.temps.some((t) => t.id === c.id)) return; // 이미 이 도크에 투입됨
   if (d.temps.length >= 2) throw new Error('한 도크에 특공대는 최대 2명입니다');
-  // 다른 도크에 투입돼 있었으면 거기서 빼고 이동
-  if (c.status === 'in' && c.dockId && c.dockId !== dockId) { const pd = state.docks[c.dockId]; if (pd && pd.temps) pd.temps = pd.temps.filter((t) => t.id !== c.id); }
-  d.temps.push({ id: c.id, name: c.name }); d.noTruck = false;
+  // 다른 도크에 투입돼 있었으면 거기서 빼고 이동(전위치 기록)
+  if (c.status === 'in' && c.dockId && c.dockId !== dockId) { const pd = state.docks[c.dockId]; if (pd && pd.temps) pd.temps = pd.temps.filter((t) => t.id !== c.id); c.lastDockId = c.dockId; }
+  d.temps.push({ id: c.id, name: c.name });
+  if (d.status === 'waiting') d.noTruck = false; // 빈 대기 도크 메꿈 = 차 있음(미접안 해제). 작업중 도크는 손대지 않음.
   c.status = 'in'; c.dockId = d.id;
-  logEvent('commando_deploy', { dockId: d.id, commando: c.name });
+  logEvent('commando_deploy', { dockId: d.id, commando: c.name, working: d.status === 'working' });
   tryMatch(); // 미접안 풀리며 배정 대상이 될 수 있음
   persistAndEmit();
 }
@@ -382,7 +383,7 @@ function recallCommando(commandoId) {
   ensureConfigured();
   const c = state.commandos[commandoId];
   if (!c) throw new Error('없는 특공대');
-  if (c.status === 'in' && c.dockId) { const d = state.docks[c.dockId]; if (d && d.temps) d.temps = d.temps.filter((t) => t.id !== c.id); }
+  if (c.status === 'in' && c.dockId) { const d = state.docks[c.dockId]; if (d && d.temps) d.temps = d.temps.filter((t) => t.id !== c.id); c.lastDockId = c.dockId; }
   c.status = 'idle'; c.dockId = null;
   logEvent('commando_recall', { commando: c.name });
   persistAndEmit();
@@ -506,7 +507,7 @@ function tryMatch() {
 // 도크의 특공대 오버레이 전원 제거 + 그 특공대들을 대기(idle)로
 function releaseTemp(dock) {
   if (!dock || !dock.temps || !dock.temps.length) return;
-  dock.temps.forEach((t) => { const c = state.commandos[t.id]; if (c) { c.status = 'idle'; c.dockId = null; } });
+  dock.temps.forEach((t) => { const c = state.commandos[t.id]; if (c) { c.status = 'idle'; c.dockId = null; c.lastDockId = dock.id; } });
   dock.temps = [];
 }
 

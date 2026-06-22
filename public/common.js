@@ -6,12 +6,40 @@ let lastState = null;
 let clockOffset = 0; // serverNow - clientNow
 const stateListeners = [];
 
+/* ── 연결 상태 오버레이 ──
+   연결/재연결 중에는 "연결 중" 화면을 덮어 빈 화면을 잘못 누르는 것을 막는다.
+   (배포판에서 연결 전 빈 화면을 누르면 인증 전이라 "관리자 비밀번호 오류"가 떴던 문제 방지.)
+   - 인증 없는 화면(보드/신호수): 첫 state 도착 = 준비 완료 → 해제.
+   - 인증 화면(관리/세팅): 인증이 끝나거나 비번 게이트가 뜰 때 해제(ensureManagerAuth에서). */
+let _authManaged = false; // ensureManagerAuth를 쓰는 페이지면 true (인증까지 끝나야 화면 오픈)
+let _connEl = null;
+function showConnecting(msg) {
+  if (!document.body) { document.addEventListener('DOMContentLoaded', () => showConnecting(msg), { once: true }); return; }
+  if (!_connEl) {
+    _connEl = document.createElement('div');
+    _connEl.id = 'connOverlay';
+    _connEl.style.cssText = 'position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:10000;font-family:sans-serif;color:#e2e8f0';
+    _connEl.innerHTML = '<div style="width:46px;height:46px;border:4px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:connspin .8s linear infinite"></div>'
+      + '<div id="connMsg" style="font-size:18px;font-weight:600">연결 중…</div>'
+      + '<style>@keyframes connspin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(_connEl);
+  }
+  const m = _connEl.querySelector('#connMsg');
+  if (m) m.textContent = msg || '연결 중…';
+  _connEl.style.display = 'flex';
+}
+function hideConnecting() { if (_connEl) _connEl.style.display = 'none'; }
+
+showConnecting(); // 로드 즉시 (소켓은 아직 연결 전)
+socket.on('disconnect', () => showConnecting('연결이 끊겼습니다 · 재연결 중…'));
+
 socket.on('state', (s) => {
   lastState = s;
   clockOffset = s.serverNow - Date.now();
+  if (!_authManaged) hideConnecting(); // 인증 없는 화면: 첫 상태 도착 = 준비 완료
   stateListeners.forEach((fn) => { try { fn(s); } catch (e) { console.error(e); } });
 });
-socket.on('connect_error', (e) => console.warn('소켓 오류:', e.message));
+socket.on('connect_error', (e) => { console.warn('소켓 오류:', e.message); showConnecting('서버에 연결 중…'); });
 
 function onState(fn) {
   stateListeners.push(fn);
@@ -55,11 +83,12 @@ function onHello(fn) { _helloFns.push(fn); if (_hello) fn(_hello); }
 
 // onReady() 는 인증이 끝났을 때(또는 비번 미설정이면 즉시) 호출된다.
 function ensureManagerAuth(onReady) {
+  _authManaged = true; // 인증이 끝나기 전엔 '연결 중' 오버레이를 내리지 않음(인증 전 클릭 방지)
   let pw = localStorage.getItem('mgrpw') || '';
   let done = false;
   socket.on('connect', () => { if (pw) socket.emit('auth', pw, () => {}); }); // 재연결 시 자동 재인증
 
-  function proceed() { removeGate(); if (!done) { done = true; onReady(); } }
+  function proceed() { hideConnecting(); removeGate(); if (!done) { done = true; onReady(); } }
   function decide(h) {
     if (!h.authRequired || h.authed) return proceed();
     if (pw) {
@@ -70,6 +99,7 @@ function ensureManagerAuth(onReady) {
     } else showGate();
   }
   function showGate() {
+    hideConnecting(); // 비번 입력 화면을 보여주기 위해 연결중 오버레이는 내림
     if (document.getElementById('authGate')) return;
     const g = document.createElement('div');
     g.id = 'authGate';
