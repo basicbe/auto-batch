@@ -220,7 +220,8 @@ function setup({ active, roster, commandos, startedAt, mealStart, mealEnd } = {}
   persistAndEmit();
 }
 
-// 도크 작업 종료 → 그 작업자 휴게 시작, 도크는 대기열로
+// 도크 작업 종료 → 그 작업자 휴게 시작, 도크는 대기열로.
+// 옆에서 거들던 특공대(temps)가 있으면 작업이 끝난 것이니 함께 빠진다(대기 풀로).
 function endWork(dockId) {
   ensureConfigured();
   const d = state.docks[dockId];
@@ -229,6 +230,7 @@ function endWork(dockId) {
 
   const w = state.workers[d.workerId];
   d.status = 'waiting'; d.freedAt = Date.now(); d.workerId = null;
+  if (d.temps && d.temps.length) releaseTemp(d); // 같이 거들던 특공대도 함께 빠짐
   w.status = 'break'; w.dockId = null; w.breakStartedAt = Date.now(); w.readyAt = null; w.returningUntil = null; w.lastDockId = dockId; w.updatedAt = Date.now();
 
   scheduleAssign(w.id);
@@ -356,7 +358,8 @@ function pullToStandby(workerId) {
 // ---- 특공대(별도 풀, FIFO 무관) ----
 
 // 특공대 투입: 도크에 특공대를 올려 메꾸게/거들게 함(temps 오버레이, 한 도크 최대 2명).
-//  - 빈 대기 도크: 특공대가 메꿈. 여전히 FIFO 대상이라 복귀자가 배정되면 교대(assign에서 자동). 차 있음 → 미접안 해제.
+//  - 빈 대기 도크: 특공대가 메꿈. 미접안 표시는 그대로 둔다(특공대는 인력 오버레이일 뿐, 차 도착(접안)과 무관).
+//    미접안 아닌 도크면 여전히 FIFO 대상 → 복귀자 배정되면 교대(assign에서 자동).
 //  - 작업중 도크: 작업자 옆에서 거들기(인력 추가). 도크 상태/배정은 그대로 두고 오버레이만 추가.
 function deployCommando(commandoId, dockId) {
   ensureConfigured();
@@ -371,10 +374,10 @@ function deployCommando(commandoId, dockId) {
   // 다른 도크에 투입돼 있었으면 거기서 빼고 이동(전위치 기록)
   if (c.status === 'in' && c.dockId && c.dockId !== dockId) { const pd = state.docks[c.dockId]; if (pd && pd.temps) pd.temps = pd.temps.filter((t) => t.id !== c.id); c.lastDockId = c.dockId; }
   d.temps.push({ id: c.id, name: c.name });
-  if (d.status === 'waiting') d.noTruck = false; // 빈 대기 도크 메꿈 = 차 있음(미접안 해제). 작업중 도크는 손대지 않음.
+  // 미접안(noTruck)은 그대로 둔다 — 특공대 투입은 인력 오버레이일 뿐, 차 도착(접안)과 무관.
   c.status = 'in'; c.dockId = d.id;
   logEvent('commando_deploy', { dockId: d.id, commando: c.name, working: d.status === 'working' });
-  tryMatch(); // 미접안 풀리며 배정 대상이 될 수 있음
+  tryMatch(); // 미접안 아닌 빈 대기 도크면 복귀 준비된 작업자가 바로 가져갈 수 있음
   persistAndEmit();
 }
 

@@ -122,6 +122,33 @@ const setup3 = () => engine.setup({
   engine.recallCommando(C('특공A').id);
   assert(D('B23').temps.length === 1 && C('특공A').status === 'idle', '빼기: 한 명만 빠지고 나머지 유지');
 
+  // ── 시나리오 8: 작업중 도크에 작업자+특공대 → 작업 종료 누르면 특공대도 함께 빠짐 ──
+  engine.reset();
+  engine.setup({ active: ['B22', 'B23', 'B24'], commandos: ['특공A', '특공B'], roster: [
+    { dockId: 'B22', workerName: '김' }, { dockId: 'B23', workerName: '이' }, { dockId: 'B24', workerName: '박' }] });
+  engine.deployCommando(C('특공A').id, 'B22');   // 작업중 B22에 특공A 거들기
+  engine.deployCommando(C('특공B').id, 'B22');   // 2명 다 거들기
+  assert(D('B22').status === 'working' && D('B22').workerId && D('B22').temps.length === 2
+    && C('특공A').status === 'in' && C('특공B').status === 'in', '작업중 B22: 김 작업 + 특공A·B 거들기');
+  engine.endWork('B22');                          // 작업 종료 → 김 휴게 + 특공대 전원 함께 빠짐
+  assert(D('B22').temps.length === 0 && C('특공A').status === 'idle' && C('특공B').status === 'idle',
+    '작업 종료 시 거들던 특공대 전원 함께 빠짐(대기 풀로)');
+  assert(W('김').status === 'break' && D('B22').status === 'waiting' && !D('B22').workerId,
+    '김 휴게 + B22 대기열로');
+
+  // ── 시나리오 9: 미접안(noTruck) 도크에 특공대 투입 → 미접안 유지(차 도착과 무관) ──
+  engine.reset();
+  engine.setup({ active: ['B22', 'B23', 'B24'], commandos: ['특공A'], roster: [
+    { dockId: 'B22', workerName: '김' }, { dockId: 'B23', workerName: '이' }, { dockId: 'B24', workerName: '박' }] });
+  engine.endWork('B22');                        // 김 휴게, B22 대기
+  engine.setNoTruck('B22', true);               // B22 미접안
+  engine.deployCommando(C('특공A').id, 'B22');  // 미접안 도크에 특공A 투입
+  assert(D('B22').noTruck === true, '미접안 도크에 특공대 넣어도 미접안 유지');
+  assert(D('B22').temps.length === 1 && C('특공A').status === 'in', '특공A는 B22에 투입됨');
+  await sleep(1300);                            // 김 ready 돼도 B22는 미접안이라 배정 제외
+  assert(W('김').status === 'ready' && D('B22').workerId === null, '미접안이라 복귀자 안 꽂힘');
+  assert(D('B22').temps.length === 1 && C('특공A').status === 'in', '교대 없이 특공A 그대로 유지');
+
   engine.reset();
   report();
 })();
