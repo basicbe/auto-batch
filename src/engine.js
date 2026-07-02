@@ -2,7 +2,7 @@
 //
 // 핵심 규칙: "도크가 끝난 순서대로"(FIFO)
 //   - 작업 끝난 도크는 freedAt(끝난 시각)을 달고 '대기열'에 들어간다.
-//   - 작업자는 휴게 시작 후 ASSIGN_DELAY_SEC(기본 8분)가 지나면 '복귀 준비(ready)' 상태가 된다.
+//   - 작업자는 휴게 시작 후 배정시간(기본 6분30초, 관리 화면에서 변경 가능)이 지나면 '복귀 준비(ready)' 상태가 된다.
 //   - 매칭: 가장 오래된 대기 도크 ↔ 가장 먼저 준비된 작업자. 둘 다 있으면 계속 짝지어 배정.
 //   - 같은 도크로 다시 가도 막지 않는다(요구사항).
 //
@@ -29,6 +29,7 @@ function freshState() {
   return {
     configured: false, startedAt: null,
     mealStart: config.MEAL_START_DEFAULT, mealEnd: config.MEAL_END_DEFAULT,
+    assignDelaySec: null, breakDelaySec: null, // null = config 기본값. 관리 화면에서 변경하면 초 단위로 저장(이쪽 우선)
     docks, workers: {}, commandos: {}, events: [], acks: {}, seq: 0,
   };
 }
@@ -52,12 +53,14 @@ async function init() {
   }
   if (!state.acks) state.acks = {}; // 구버전 저장 상태 보강
   if (!state.commandos) state.commandos = {}; // 특공대 풀(구버전 보강)
+  if (state.assignDelaySec === undefined) state.assignDelaySec = null; // 배정/휴게 시간(구버전 보강)
+  if (state.breakDelaySec === undefined) state.breakDelaySec = null;
 
   // 진행 중이던 휴게 타이머 복구
   for (const w of Object.values(state.workers)) {
     if (w.status === 'break') scheduleAssign(w.id);
   }
-  markReadyDue(); // 다운타임 동안 이미 8분 넘은 작업자 즉시 처리
+  markReadyDue(); // 다운타임 동안 이미 배정시간 넘은 작업자 즉시 처리
 
   if (!sweepStarted) {
     setInterval(markReadyDue, config.SWEEP_INTERVAL_MS);
@@ -85,7 +88,7 @@ function getState() {
       id: w.id, name: w.name, status: w.status, dockId: w.dockId,
       breakStartedAt: w.breakStartedAt || null,
       assignAt: w.breakStartedAt ? w.breakStartedAt + assignDelaySecFor(w.breakStartedAt, state.startedAt, currentMealEndMin()) * 1000 : null,
-      returnAt: w.breakStartedAt ? w.breakStartedAt + config.BREAK_DELAY_SEC * 1000 : null,
+      returnAt: w.breakStartedAt ? w.breakStartedAt + effBreakDelaySec() * 1000 : null,
       returningUntil: w.returningUntil || null,
       lastDockId: w.lastDockId || null,
       updatedAt: w.updatedAt || 0,
@@ -100,8 +103,9 @@ function getState() {
     configured: state.configured,
     startedAt: state.startedAt,
     serverNow: Date.now(),
-    assignDelaySec: config.ASSIGN_DELAY_SEC,
-    breakDelaySec: config.BREAK_DELAY_SEC,
+    assignDelaySec: effAssignDelaySec(),
+    breakDelaySec: effBreakDelaySec(),
+    undoWindowSec: config.UNDO_WINDOW_SEC,
     fastMode: isFastWindow(Date.now(), state.startedAt, currentMealEndMin()),
     mealStart: state.mealStart || config.MEAL_START_DEFAULT,
     mealEnd: state.mealEnd || config.MEAL_END_DEFAULT,
@@ -165,6 +169,8 @@ function setup({ active, roster, commandos, startedAt, mealStart, mealEnd } = {}
   const keepStartedAt = prev && prev.configured ? prev.startedAt : null; // 진행 중이면 시작시각 유지
   const keepMealStart = prev && prev.configured ? prev.mealStart : null;
   const keepMealEnd = prev && prev.configured ? prev.mealEnd : null;
+  const keepAssign = prev ? prev.assignDelaySec || null : null; // 배정/휴게 변경값은 세팅을 다시 해도 유지
+  const keepBreak = prev ? prev.breakDelaySec || null : null;
 
   for (const id of [...timers.keys()]) clearTimer(id);
 
@@ -173,7 +179,8 @@ function setup({ active, roster, commandos, startedAt, mealStart, mealEnd } = {}
   const sa = Number(startedAt);
   state.startedAt = Number.isFinite(sa) ? sa : (keepStartedAt || Date.now()); // 세팅에서 지정한 시작 시각 우선
   state.mealStart = hhmmToMin(mealStart) != null ? mealStart : (keepMealStart || config.MEAL_START_DEFAULT);
-  state.mealEnd = hhmmToMin(mealEnd) != null ? mealEnd : (keepMealEnd || config.MEAL_END_DEFAULT); // 밥 끝 시각 → 직후 1시간 빠른배정
+  state.mealEnd = hhmmToMin(mealEnd) != null ? mealEnd : (keepMealEnd || config.MEAL_END_DEFAULT); // 밥 끝 시각 → 직후 56분 빠른배정
+  state.assignDelaySec = keepAssign; state.breakDelaySec = keepBreak;
 
   active.forEach((id) => {
     const d = state.docks[id];
@@ -240,13 +247,14 @@ function endWork(dockId) {
 }
 
 // 도크 종료를 잘못 눌렀을 때 되돌리기: 휴게 중인 작업자를 방금 나온 도크로 복귀.
-// 작업자가 아직 '휴게'(재배정 전)이고 그 도크가 여전히 대기(빈)일 때만 가능.
+// 종료 후 UNDO_WINDOW_SEC(기본 1분) 이내 + 아직 '휴게'(재배정 전) + 그 도크가 여전히 대기(빈)일 때만 가능.
 // 잘못 기록된 종료 이벤트와 신호수 확인표시도 지워 신호수 화면에서 사라지게 한다.
 function undoEnd(workerId) {
   ensureConfigured();
   const w = state.workers[workerId];
   if (!w) throw new Error('없는 작업자');
   if (w.status !== 'break') throw new Error('휴게 시작 직후에만 되돌릴 수 있어요(이미 배정이 진행됨 — 자리 변경을 쓰세요)');
+  if (Date.now() - (w.breakStartedAt || 0) > config.UNDO_WINDOW_SEC * 1000) throw new Error(`종료 취소는 종료 후 ${config.UNDO_WINDOW_SEC}초 이내에만 가능합니다`);
   const d = w.lastDockId && state.docks[w.lastDockId];
   if (!d) throw new Error('되돌릴 도크를 찾을 수 없습니다');
   if (d.status !== 'waiting' || d.workerId) throw new Error(d.id + ' 에 이미 다른 작업자가 들어가 되돌릴 수 없습니다(자리 변경을 쓰세요)');
@@ -406,9 +414,28 @@ function commandoFinish(dockId) {
   persistAndEmit();
 }
 
+// 배정/휴게 시간 변경(관리 화면 요약줄의 "배정/휴게" 클릭). 초 단위.
+// 진행 중인 휴게 타이머도 새 값으로 다시 걸고, 이미 지난 작업자는 즉시 준비 처리.
+function setTiming({ assignDelaySec, breakDelaySec } = {}) {
+  ensureConfigured();
+  const a = Math.round(Number(assignDelaySec));
+  const b = Math.round(Number(breakDelaySec));
+  if (!Number.isFinite(a) || a < 5 || a > 7200) throw new Error('배정 시간은 5초~2시간 사이로 입력하세요');
+  if (!Number.isFinite(b) || b < 5 || b > 7200) throw new Error('휴게 시간은 5초~2시간 사이로 입력하세요');
+  if (b < a) throw new Error('휴게 시간은 배정 시간보다 짧을 수 없습니다');
+  state.assignDelaySec = a;
+  state.breakDelaySec = b;
+  for (const w of Object.values(state.workers)) if (w.status === 'break') scheduleAssign(w.id);
+  logEvent('timing', { assignDelaySec: a, breakDelaySec: b });
+  markReadyDue();
+  persistAndEmit();
+}
+
 function reset() {
+  const keepAssign = state.assignDelaySec || null, keepBreak = state.breakDelaySec || null; // 시간 설정은 리셋에도 유지
   for (const id of [...timers.keys()]) clearTimer(id);
   state = freshState();
+  state.assignDelaySec = keepAssign; state.breakDelaySec = keepBreak;
   persistAndEmit();
 }
 
@@ -437,13 +464,17 @@ function currentMealEndMin() {
   return m != null ? m : hhmmToMin(config.MEAL_END_DEFAULT);
 }
 
-// 빠른 배정 윈도우: ① 작업 시작 1시간 이내, 또는 ② 밥시간 직후 1시간(KST). mealEndMin = 밥 끝나는 시각(분).
+// 빠른 배정 윈도우: ① 작업 시작 56분 이내, 또는 ② 밥시간 직후 56분(KST). mealEndMin = 밥 끝나는 시각(분).
 function isFastWindow(t, startedAt, mealEndMin) {
   if (startedAt && t - startedAt < config.FAST_AFTER_START_MIN * 60 * 1000) return true;
   return inDailyRange(kstMinutesOfDay(t), mealEndMin, config.FAST_AFTER_MEAL_MIN);
 }
+// 배정/휴게 시간(초): 관리 화면에서 바꾼 값(state)이 있으면 그것, 없으면 config 기본값.
+// state 없이도 동작(테스트가 assignDelaySecFor를 순수 함수로 직접 호출).
+function effAssignDelaySec() { return (state && state.assignDelaySec) || config.ASSIGN_DELAY_SEC; }
+function effBreakDelaySec() { return (state && state.breakDelaySec) || config.BREAK_DELAY_SEC; }
 function assignDelaySecFor(t, startedAt, mealEndMin) {
-  return isFastWindow(t, startedAt, mealEndMin) ? config.FAST_ASSIGN_DELAY_SEC : config.ASSIGN_DELAY_SEC;
+  return isFastWindow(t, startedAt, mealEndMin) ? config.FAST_ASSIGN_DELAY_SEC : effAssignDelaySec();
 }
 
 function scheduleAssign(workerId) {
@@ -471,7 +502,7 @@ function markReady(workerId) {
   persistAndEmit();
 }
 
-// 안전망: 8분 지났는데 아직 처리 안 된 작업자들을 한 번에 준비 처리
+// 안전망: 배정시간 지났는데 아직 처리 안 된 작업자들을 한 번에 준비 처리
 function markReadyDue() {
   const now = Date.now();
   let changed = false;
@@ -522,9 +553,9 @@ function assign(worker, dock) {
   // → 나중에 차 없어서 '대기로 빼기/이동'할 때 도크의 원래 대기시간·작업자의 원래 준비시각을 복원할 수 있음.
   dock.status = 'working'; dock.workerId = worker.id;
   worker.dockId = dock.id; worker.status = 'working';
-  // "→ 이동" 강조 유지: 빠른배정이면 배정 후 FAST_HIGHLIGHT_SEC(기본 2분), 아니면 복귀 예정(휴게 시작+10분)까지
+  // "→ 이동" 강조 유지: 빠른배정이면 배정 후 FAST_HIGHLIGHT_SEC(기본 2분), 아니면 복귀 예정(휴게 시작+휴게시간)까지
   worker.returningUntil = bs
-    ? (isFastWindow(bs, state.startedAt, currentMealEndMin()) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + config.BREAK_DELAY_SEC * 1000)
+    ? (isFastWindow(bs, state.startedAt, currentMealEndMin()) ? Date.now() + config.FAST_HIGHLIGHT_SEC * 1000 : bs + effBreakDelaySec() * 1000)
     : null;
   worker.breakStartedAt = null; worker.lastDockId = null; worker.updatedAt = Date.now();
   clearTimer(worker.id);
@@ -544,4 +575,4 @@ function logEvent(type, data) {
 function persistAndEmit() { db.save(state); emit(); }
 function emit() { try { broadcast(getState()); } catch (e) { console.error('[engine] emit 실패:', e.message); } }
 
-module.exports = { init, setBroadcast, getState, setup, endWork, undoEnd, manualAssign, setNoTruck, pullToStandby, deployCommando, recallCommando, commandoFinish, reset, ackEnd, isFastWindow, assignDelaySecFor, hhmmToMin };
+module.exports = { init, setBroadcast, getState, setup, endWork, undoEnd, manualAssign, setNoTruck, pullToStandby, deployCommando, recallCommando, commandoFinish, reset, ackEnd, setTiming, isFastWindow, assignDelaySecFor, hhmmToMin };

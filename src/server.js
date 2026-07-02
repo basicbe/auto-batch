@@ -4,6 +4,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const engine = require('./engine');
 const db = require('./db');
+const config = require('./config');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,7 +19,10 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 engine.setBroadcast((s) => io.emit('state', s));
 
 io.on('connection', (socket) => {
-  socket.data.authed = !MANAGER_PASSWORD; // 비번 미설정이면 누구나 허용
+  // 비번 미설정이면 누구나 허용. 핸드셰이크에 동봉된 비밀번호(auth.mgrpw)가 맞으면 즉시 인증
+  // → 재연결 시 auth 왕복 없이 바로 제어 가능(클라이언트 common.js 참조).
+  socket.data.authed = !MANAGER_PASSWORD
+    || (socket.handshake.auth && socket.handshake.auth.mgrpw) === MANAGER_PASSWORD;
   const sendHello = () => socket.emit('hello', { authRequired: !!MANAGER_PASSWORD, authed: socket.data.authed });
   sendHello();
   socket.emit('state', engine.getState()); // 접속 즉시 현재 상태 전달
@@ -40,9 +44,13 @@ io.on('connection', (socket) => {
   socket.on('commando:recall', (p, ack) => guarded(socket, ack, () => engine.recallCommando(p && p.commandoId)));
   socket.on('commando:finish', (p, ack) => guarded(socket, ack, () => engine.commandoFinish(p && p.dockId)));
   socket.on('day:reset', (_p, ack) => guarded(socket, ack, () => engine.reset()));
+  socket.on('timing:set', (p, ack) => guarded(socket, ack, () => engine.setTiming(p)));
 
   // 신호수 '확인'은 인증 없이 허용(읽기 화면용 공유 표시 — 한 명이 확인하면 전 화면 반영)
   socket.on('signal:ack', (p, ack) => respond(ack, () => engine.ackEnd(p && p.seq, p && p.acked)));
+
+  // 화면 복귀 시 연결 생존 확인용 no-op 응답(클라이언트 reviveSocket)
+  socket.on('hb', (ack) => { if (typeof ack === 'function') ack(); });
 });
 
 function respond(ack, fn) {
@@ -78,7 +86,7 @@ engine.init()
       console.log(`auto-batch 실행 중 → http://localhost:${PORT}`);
       const dbLabel = db.mode === 'supabase' ? 'Supabase (supabase-js)'
         : db.mode === 'pg' ? 'Supabase/Postgres (pg)' : 'JSON 파일';
-      console.log(`DB: ${dbLabel} · 배정 ${process.env.ASSIGN_DELAY_SEC || 480}s / 휴게 ${process.env.BREAK_DELAY_SEC || 600}s`);
+      console.log(`DB: ${dbLabel} · 기본 배정 ${config.ASSIGN_DELAY_SEC}s / 휴게 ${config.BREAK_DELAY_SEC}s (관리 화면에서 변경 가능)`);
     });
   })
   .catch((e) => { console.error('초기화 실패:', e.message); process.exit(1); });

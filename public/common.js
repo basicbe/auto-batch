@@ -1,7 +1,15 @@
 /* 모든 화면 공통: 소켓 연결, 서버 시계 보정, 카운트다운 헬퍼 */
 /* global io */
 
-const socket = io();
+// 웹소켓 우선(실패 시 폴링 폴백) + 짧은 재시도 간격 → 재연결 왕복 최소화.
+// auth: 저장된 관리자 비밀번호를 핸드셰이크에 동봉해 재연결 때 인증 왕복을 없앤다(서버가 handshake.auth로 확인).
+const socket = io({
+  transports: ['websocket', 'polling'],
+  tryAllTransports: true,
+  reconnectionDelay: 300,
+  reconnectionDelayMax: 2000,
+  auth: (cb) => cb({ mgrpw: localStorage.getItem('mgrpw') || '' }),
+});
 let lastState = null;
 let clockOffset = 0; // serverNow - clientNow
 const stateListeners = [];
@@ -18,10 +26,12 @@ function showConnecting(msg) {
   if (!_connEl) {
     _connEl = document.createElement('div');
     _connEl.id = 'connOverlay';
-    _connEl.style.cssText = 'position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:10000;font-family:sans-serif;color:#e2e8f0';
+    _connEl.style.cssText = 'position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:10000;font-family:sans-serif;color:#e2e8f0;touch-action:none;overscroll-behavior:none';
     _connEl.innerHTML = '<div style="width:46px;height:46px;border:4px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:connspin .8s linear infinite"></div>'
       + '<div id="connMsg" style="font-size:18px;font-weight:600">연결 중…</div>'
       + '<style>@keyframes connspin{to{transform:rotate(360deg)}}</style>';
+    // 모바일에서 오버레이 위 스크롤 제스처가 뒤 페이지를 고무줄처럼 끌어 오버레이가 움직여 보이는 것 방지
+    _connEl.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
     document.body.appendChild(_connEl);
   }
   const m = _connEl.querySelector('#connMsg');
@@ -40,6 +50,17 @@ socket.on('state', (s) => {
   stateListeners.forEach((fn) => { try { fn(s); } catch (e) { console.error(e); } });
 });
 socket.on('connect_error', (e) => { console.warn('소켓 오류:', e.message); showConnecting('서버에 연결 중…'); });
+
+/* ── 화면 복귀 시 즉시 재연결 ──
+   백그라운드에 다녀오면 다음 재시도 예약(백오프 최대 2초)을 기다리지 않고 바로 붙는다.
+   연결된 것으로 보여도 얼려진 사이 죽었을 수 있어, 2초 내 응답 없으면 끊고 새로 연결. */
+function reviveSocket() {
+  if (socket.disconnected) { socket.connect(); return; }
+  socket.timeout(2000).emit('hb', (err) => { if (err) { socket.disconnect(); socket.connect(); } });
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reviveSocket(); });
+window.addEventListener('pageshow', reviveSocket);
+window.addEventListener('online', reviveSocket);
 
 function onState(fn) {
   stateListeners.push(fn);
@@ -62,7 +83,8 @@ function act(ev, payload) {
   return new Promise((res) => socket.emit(ev, payload, res));
 }
 
-// 1초마다 data-count-to(남은시간)/data-count-from(경과시간) 엘리먼트 갱신 → 셀렉트/버튼 안 건드림
+// 1초마다 data-count-to(남은시간)/data-count-from(경과시간) 엘리먼트 갱신 → 셀렉트/버튼 안 건드림.
+// 예외: data-hide-at(만료 시각 ms)이 지난 요소는 제거 — 상태 변경 없이도 제때 사라지게(예: 종료취소 버튼 1분).
 function startCountdowns() {
   setInterval(() => {
     const now = srvNow();
@@ -71,6 +93,9 @@ function startCountdowns() {
     });
     document.querySelectorAll('[data-count-from]').forEach((el) => {
       el.textContent = fmt((now - +el.dataset.countFrom) / 1000);
+    });
+    document.querySelectorAll('[data-hide-at]').forEach((el) => {
+      if (now >= +el.dataset.hideAt) el.remove();
     });
   }, 1000);
 }
@@ -86,7 +111,7 @@ function ensureManagerAuth(onReady) {
   _authManaged = true; // 인증이 끝나기 전엔 '연결 중' 오버레이를 내리지 않음(인증 전 클릭 방지)
   let pw = localStorage.getItem('mgrpw') || '';
   let done = false;
-  socket.on('connect', () => { if (pw) socket.emit('auth', pw, () => {}); }); // 재연결 시 자동 재인증
+  // 재연결 시 재인증은 핸드셰이크 auth(mgrpw)가 처리 — 별도 auth 왕복 불필요.
 
   function proceed() { hideConnecting(); removeGate(); if (!done) { done = true; onReady(); } }
   function decide(h) {

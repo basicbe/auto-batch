@@ -21,16 +21,24 @@ function render(s) {
   }
   notice.classList.add('hidden');
 
-  const fastBadge = s.fastMode
-    ? ' · <b class="text-orange-600">⚡ 빠른배정 중</b>'
-    : ` · 배정 ${s.assignDelaySec}s / 휴게 ${s.breakDelaySec}s`;
-  const noTruckBadge = s.stats.noTruck ? ` · 미접안 <b class="text-rose-600">${s.stats.noTruck}</b>` : '';
-  const readyBadge = s.stats.ready ? ` · 대기인력 <b class="text-indigo-600">${s.stats.ready}</b>` : '';
-  const cmdBadge = s.stats.commandos ? ` · 특공대 <b class="text-violet-600">${s.stats.commandoIn}/${s.stats.commandos}</b>` : '';
-  document.getElementById('summary').innerHTML =
-    `가동 <b>${s.stats.active}</b> · 비가동 <b>${s.stats.inactive}</b> · ` +
-    `작업중 <b>${s.stats.working}</b> · 대기 <b class="text-amber-600">${s.stats.waiting}</b>${noTruckBadge}${readyBadge} · ` +
-    `휴게중 <b class="text-blue-600">${s.stats.onBreak}</b>${cmdBadge}${fastBadge}`;
+  // 요약 칩: 숫자는 잉크색으로 통일, 상태 색은 라벨 옆 점·아이콘이 담당(라벨이 항상 붙어 색만으로 구분하지 않음).
+  // 점 색 4종(작업중 emerald-600 / 대기 amber-600 / 휴게중 blue-500 / 대기인력 indigo-600)은
+  // 색각이상 구분(CVD)·대비 검증을 통과한 세트 — 하나만 바꾸지 말고 세트로 재검토할 것.
+  const chip = (label, val, dot) =>
+    `<span class="inline-flex items-center gap-1.5 bg-white rounded-lg shadow-sm px-2.5 py-1.5">`
+    + (dot ? `<span class="w-2 h-2 rounded-full shrink-0 ${dot}"></span>` : '')
+    + `<span class="text-xs text-slate-500">${label}</span><span class="text-sm font-semibold text-slate-800">${val}</span></span>`;
+  document.getElementById('summary').innerHTML = [
+    chip('가동', `${s.stats.active}/${s.stats.total}`),
+    chip('작업중', s.stats.working, 'bg-emerald-600'),
+    chip('대기', s.stats.waiting, 'bg-amber-600'),
+    s.stats.noTruck ? `<span class="inline-flex items-center gap-1.5 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><span class="text-xs font-medium text-rose-700">🚫 미접안</span><span class="text-sm font-semibold text-rose-700">${s.stats.noTruck}</span></span>` : '',
+    chip('휴게중', s.stats.onBreak, 'bg-blue-500'),
+    s.stats.ready ? chip('대기인력', s.stats.ready, 'bg-indigo-600') : '',
+    s.stats.commandos ? `<span class="inline-flex items-center gap-1.5 bg-white rounded-lg shadow-sm px-2.5 py-1.5"><span class="text-xs text-violet-700">🛠 특공대</span><span class="text-sm font-semibold text-slate-800">${s.stats.commandoIn}/${s.stats.commandos}</span></span>` : '',
+    `<button id="timingBtn" title="배정/휴게 시간 변경" class="inline-flex items-center bg-white rounded-lg shadow-sm px-2.5 py-1.5 text-xs text-slate-500 hover:text-blue-700 hover:shadow">⏱ 배정&nbsp;<b class="text-sm font-semibold text-slate-800">${fmt(s.assignDelaySec)}</b>&nbsp;· 휴게&nbsp;<b class="text-sm font-semibold text-slate-800">${fmt(s.breakDelaySec)}</b>&nbsp;✎</button>`,
+    s.fastMode ? '<span class="inline-flex items-center bg-orange-500 text-white rounded-lg px-2.5 py-1.5 text-xs font-semibold">⚡ 빠른배정 중</span>' : '',
+  ].filter(Boolean).join('');
 
   // 대기 도크 배정 순서 (가장 오래된 = 다음 배정). 미접안은 제외 목록으로 따로.
   const qEl = document.getElementById('queue');
@@ -160,16 +168,21 @@ function commandoCard(c, targets) {
   return el;
 }
 
+// 종료 취소 가능 시간: 종료 후 undoWindowSec(기본 1분) 이내만. 지난 시각(ms)을 넘기면 버튼 자체를 안 그린다.
+function undoDeadline(w) {
+  return (w.breakStartedAt || 0) + ((cur && cur.undoWindowSec) || 60) * 1000;
+}
 // 되돌리기 대상: 이 도크에서 방금 나와 아직 휴게 중인 작업자(가장 최근). — 대기 도크 카드용
 function undoWorkerForDock(dockId) {
   if (!cur || !cur.workers) return null;
   return cur.workers
-    .filter((w) => w.status === 'break' && w.lastDockId === dockId)
+    .filter((w) => w.status === 'break' && w.lastDockId === dockId && srvNow() < undoDeadline(w))
     .sort((a, b) => (b.breakStartedAt || 0) - (a.breakStartedAt || 0))[0] || null;
 }
-// 이 작업자를 되돌릴 수 있나: 방금 나온 도크가 아직 대기(빈)인지. — 휴게 카드용
+// 이 작업자를 되돌릴 수 있나: 방금 나온 도크가 아직 대기(빈)인지 + 1분 이내인지. — 휴게 카드용
 function undoDockForWorker(w) {
   if (!cur || !cur.docks || !w || w.status !== 'break' || !w.lastDockId) return null;
+  if (srvNow() >= undoDeadline(w)) return null;
   const d = cur.docks.find((x) => x.id === w.lastDockId);
   return (d && d.status === 'waiting' && !d.workerId) ? d : null;
 }
@@ -211,7 +224,7 @@ function dockCard(d, activeDocks) {
       cls = 'border border-amber-300 bg-amber-50';
       statusLine = `<div class="text-xs text-amber-600 mt-1">${uw ? uw.name + ' 휴게 시작' : '작업자 기다리는 중'}</div>`;
       btns = `<div class="mt-auto flex flex-col gap-1">
-           ${uw ? `<button class="undo-btn w-full text-xs py-1.5 rounded-lg bg-white border border-amber-400 text-amber-700 hover:bg-amber-100" data-worker="${uw.id}">↩ 종료 취소</button>` : ''}
+           ${uw ? `<button class="undo-btn w-full text-xs py-1.5 rounded-lg bg-white border border-amber-400 text-amber-700 hover:bg-amber-100" data-worker="${uw.id}" data-hide-at="${undoDeadline(uw)}">↩ 종료 취소</button>` : ''}
            <button class="notruck-btn w-full text-xs py-1.5 rounded-lg bg-white border border-rose-300 text-rose-600 hover:bg-rose-50" data-dock="${d.id}" data-val="1">🚫 미접안</button>
          </div>`;
     }
@@ -270,7 +283,7 @@ function breakCard(w) {
     </div>
     <div class="flex items-center justify-between gap-2 mt-0.5">
       <span class="text-xs text-blue-500">휴게 중</span>
-      ${ud ? `<button class="undo-btn text-xs px-2 py-1 rounded-lg bg-white border border-blue-300 text-blue-700 hover:bg-blue-100" data-worker="${w.id}">↩ 종료 취소 (${ud.id})</button>` : ''}
+      ${ud ? `<button class="undo-btn text-xs px-2 py-1 rounded-lg bg-white border border-blue-300 text-blue-700 hover:bg-blue-100" data-worker="${w.id}" data-hide-at="${undoDeadline(w)}">↩ 종료 취소 (${ud.id})</button>` : ''}
     </div>`;
   return el;
 }
@@ -361,6 +374,48 @@ document.getElementById('zoneTabs').addEventListener('click', (e) => {
   if (!b) return;
   selectedZone = b.dataset.zone;
   if (cur) render(cur);
+});
+
+/* ── 배정/휴게 시간 변경 모달 (요약줄의 "배정 …/휴게 …" 클릭) ── */
+// "6:30" 같은 분:초 또는 "390" 같은 초 입력을 초로 변환. 못 읽으면 null.
+function parseDur(v) {
+  const t = String(v || '').trim();
+  const m = /^(\d{1,3}):([0-5]?\d)$/.exec(t);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  return /^\d+$/.test(t) ? Number(t) : null;
+}
+function openTimingDialog() {
+  if (!cur || document.getElementById('timingDlg')) return;
+  const g = document.createElement('div');
+  g.id = 'timingDlg';
+  g.className = 'fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4';
+  g.innerHTML = `<div class="bg-white rounded-2xl shadow-xl p-5 w-72">
+      <div class="font-bold mb-3">⏱ 배정/휴게 시간</div>
+      <label class="block text-xs text-slate-500 mb-1">배정까지 (분:초 또는 초)</label>
+      <input id="tAssign" class="w-full border border-slate-300 rounded-lg px-3 py-2 mb-3" value="${fmt(cur.assignDelaySec)}">
+      <label class="block text-xs text-slate-500 mb-1">휴게 · 복귀 예정 (분:초 또는 초)</label>
+      <input id="tBreak" class="w-full border border-slate-300 rounded-lg px-3 py-2" value="${fmt(cur.breakDelaySec)}">
+      <div id="tErr" class="text-xs text-red-600 h-4 my-1"></div>
+      <div class="flex gap-2">
+        <button id="tCancel" class="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200">취소</button>
+        <button id="tSave" class="flex-1 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(g);
+  const close = () => g.remove();
+  g.addEventListener('click', (e) => { if (e.target === g) close(); });
+  g.querySelector('#tCancel').onclick = close;
+  g.querySelector('#tSave').onclick = async () => {
+    const a = parseDur(g.querySelector('#tAssign').value);
+    const b = parseDur(g.querySelector('#tBreak').value);
+    const err = g.querySelector('#tErr');
+    if (a == null || b == null) { err.textContent = '"6:30" 또는 초 단위 숫자(390)로 입력하세요'; return; }
+    const r = await act('timing:set', { assignDelaySec: a, breakDelaySec: b });
+    if (r.ok) close(); else err.textContent = r.error;
+  };
+}
+document.getElementById('summary').addEventListener('click', (e) => {
+  if (e.target.closest('#timingBtn')) openTimingDialog();
 });
 
 document.getElementById('reset').addEventListener('click', async () => {
